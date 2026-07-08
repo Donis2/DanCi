@@ -1,4 +1,4 @@
-// CardView.js - 卡片视图组件（正面单词 + 翻转 + 6档熟练度按钮 + 发音）
+// CardView.js - 卡片视图组件（正面单词 + 翻转 + 6档熟练度按钮 + 发音 + 上一个/下一个）
 
 const CardView = {
   name: 'CardView',
@@ -21,6 +21,16 @@ const CardView = {
     function speakWord() {
       if (!store.state.currentCard) return;
       TTS.speak(store.state.currentCard.wordData.word);
+    }
+
+    // 下一个单词（跳过当前，不评分）
+    function nextWord() {
+      store.skipCard();
+    }
+
+    // 上一个单词（回看）
+    function prevWord() {
+      store.prevCard();
     }
 
     // 监听卡片变化自动朗读
@@ -55,6 +65,8 @@ const CardView = {
       rate,
       skip,
       speakWord,
+      nextWord,
+      prevWord,
       proficiencyLevels,
       formattedDef
     };
@@ -121,11 +133,19 @@ const CardView = {
         </button>
       </div>
 
-      <!-- 跳过按钮 -->
-      <button @click="skip"
-              style="background:none;border:none;color:var(--text-light);cursor:pointer;font-size:13px;">
-        跳过
-      </button>
+      <!-- 上一个 / 下一个 按钮 -->
+      <div style="display:flex;gap:10px;width:100%;max-width:500px;">
+        <button class="btn-secondary" style="flex:1;" @click="prevWord"
+                :disabled="state.queueIndex === 0"
+                :style="{ opacity: state.queueIndex === 0 ? 0.5 : 1, cursor: state.queueIndex === 0 ? 'not-allowed' : 'pointer' }">
+          ← 上一个
+        </button>
+        <button class="btn-primary" style="flex:1;" @click="nextWord"
+                :disabled="state.queueIndex >= state.queue.length - 1"
+                :style="{ opacity: state.queueIndex >= state.queue.length - 1 ? 0.5 : 1, cursor: state.queueIndex >= state.queue.length - 1 ? 'not-allowed' : 'pointer' }">
+          下一个 →
+        </button>
+      </div>
     </div>
 
     <!-- 完成页面 -->

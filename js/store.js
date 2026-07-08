@@ -103,6 +103,14 @@ const Store = {
     await this.loadCurrentCard();
   },
 
+  // 回看上一个单词
+  async prevCard() {
+    if (this.state.queueIndex > 0) {
+      this.state.queueIndex--;
+      await this.loadCurrentCard();
+    }
+  },
+
   // ====== 第二任务：复习熟练度词表 ======
   async startReview(proficiencies) {
     // proficiencies: 数组，如 [1,2,3,4] 或 [4]
