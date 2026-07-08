@@ -5,30 +5,36 @@ const { createApp, onMounted } = Vue;
 const app = createApp({
   setup() {
     const store = window.Store;
-    // store.state 已经是 reactive 对象，直接使用
     const state = store.state;
 
-    // 导航
     function navigate(page) {
       store.navigate(page);
     }
 
-    // 从学习页返回
     function backToDashboard() {
       store.navigate('dashboard');
     }
 
-    // 开始学习
-    async function startStudy() {
+    // Dashboard 事件
+    function onStudy() {
       store.navigate('study');
     }
 
-    // 设置更新
+    async function onReview() {
+      store.navigate('review');
+    }
+
+    async function onWordList(prof) {
+      store.state.wordListProf = prof;
+      await store.loadWordList(prof);
+      store.navigate('wordlist');
+    }
+
+    // 设置
     function updateSetting(key, value) {
       store.updateSetting(key, value);
     }
 
-    // 重置进度
     async function resetProgress() {
       if (confirm('确定要清空所有学习进度吗？此操作不可撤销！')) {
         await store.resetAll();
@@ -44,7 +50,9 @@ const app = createApp({
       state,
       navigate,
       backToDashboard,
-      startStudy,
+      onStudy,
+      onReview,
+      onWordList,
       updateSetting,
       resetProgress
     };
@@ -79,29 +87,42 @@ const app = createApp({
 
         <!-- 页面内容 -->
         <dashboard v-if="state.currentPage === 'dashboard'"
-                   @start="startStudy">
+                   @study="onStudy"
+                   @review="onReview"
+                   @wordlist="onWordList">
         </dashboard>
 
         <card-view v-else-if="state.currentPage === 'study'"
                    @back="backToDashboard">
         </card-view>
 
+        <review-view v-else-if="state.currentPage === 'review'"
+                     @back="backToDashboard">
+        </review-view>
+
+        <word-list v-else-if="state.currentPage === 'wordlist'"
+                   @back="backToDashboard">
+        </word-list>
+
         <div v-else-if="state.currentPage === 'settings'" class="settings-group">
-          <h3>学习设置</h3>
+          <h3>显示设置</h3>
           <div class="setting-row">
-            <label>每日新词数</label>
-            <input type="number" min="5" max="100"
-                   :value="state.settings.newPerDay"
-                   @change="updateSetting('newPerDay', parseInt($event.target.value))">
-          </div>
-          <div class="setting-row">
-            <label>目标记忆保留率</label>
-            <input type="number" min="0.85" max="0.97" step="0.01"
-                   :value="state.settings.desiredRetention"
-                   @change="updateSetting('desiredRetention', parseFloat($event.target.value))">
+            <label>释义对齐方式</label>
+            <div style="display:flex;gap:6px;">
+              <button class="nav-tab"
+                      :style="{ background: state.settings.defAlign === 'left' ? 'var(--accent)' : '#edf2f7', color: state.settings.defAlign === 'left' ? 'white' : 'var(--primary)' }"
+                      @click="updateSetting('defAlign', 'left')">
+                左对齐
+              </button>
+              <button class="nav-tab"
+                      :style="{ background: state.settings.defAlign === 'center' ? 'var(--accent)' : '#edf2f7', color: state.settings.defAlign === 'center' ? 'white' : 'var(--primary)' }"
+                      @click="updateSetting('defAlign', 'center')">
+                居中
+              </button>
+            </div>
           </div>
 
-          <h3 style="margin-top:20px;">数据</h3>
+          <h3 style="margin-top:20px;">数据统计</h3>
           <div class="setting-row">
             <label>总词数</label>
             <span>{{ state.stats.total }}</span>
@@ -111,8 +132,28 @@ const app = createApp({
             <span>{{ state.stats.learned }}</span>
           </div>
           <div class="setting-row">
-            <label>已掌握</label>
-            <span>{{ state.stats.mastered }}</span>
+            <label>完全记住</label>
+            <span>{{ state.stats.byProficiency[6] || 0 }}</span>
+          </div>
+          <div class="setting-row">
+            <label>正常记住</label>
+            <span>{{ state.stats.byProficiency[5] || 0 }}</span>
+          </div>
+          <div class="setting-row">
+            <label>勉强记住</label>
+            <span>{{ state.stats.byProficiency[4] || 0 }}</span>
+          </div>
+          <div class="setting-row">
+            <label>看了才记住</label>
+            <span>{{ state.stats.byProficiency[3] || 0 }}</span>
+          </div>
+          <div class="setting-row">
+            <label>熟悉但不记得</label>
+            <span>{{ state.stats.byProficiency[2] || 0 }}</span>
+          </div>
+          <div class="setting-row">
+            <label>完全不熟悉</label>
+            <span>{{ state.stats.byProficiency[1] || 0 }}</span>
           </div>
 
           <div style="margin-top:20px;">
@@ -129,6 +170,8 @@ const app = createApp({
 // 注册组件
 app.component('dashboard', window.Dashboard);
 app.component('card-view', window.CardView);
+app.component('review-view', window.ReviewView);
+app.component('word-list', window.WordList);
 
 // 挂载
 app.mount('#app');

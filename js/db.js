@@ -1,7 +1,7 @@
 // db.js - IndexedDB 数据库封装（基于 Dexie.js）
-// 三张表：words（词频数据，只读）、cards（学习卡片状态）、reviews（复习日志）
+// 三张表：words（词频数据，只读）、cards（学习卡片，含熟练度）、reviews（复习日志）
 
-const DB_NAME = 'vocab-pwa';
+const DB_NAME = 'vocab-pwa-v2';
 
 const db = new Dexie(DB_NAME);
 
@@ -9,16 +9,50 @@ db.version(1).stores({
   // words: 词频数据，从 netem_full_list.json 导入
   words: 'rank, word, frequency, category, subcategory',
 
-  // cards: 每个单词的学习卡片状态，FSRS 调度所需字段
-  cards: 'word, due, stability, difficulty, reps, lapses, lastReview, state',
+  // cards: 每个单词的学习卡片
+  // proficiency: 0=未学习 1=完全不熟悉 2=熟悉但是不记得 3=看了才记住
+  //              4=勉强记住 5=正常记住 6=完全记住
+  // lastReview: 上次复习日期 (YYYY-MM-DD)
+  // firstLearned: 首次学习日期 (YYYY-MM-DD)
+  cards: 'word, proficiency, lastReview, firstLearned',
 
   // reviews: 每次复习的日志记录
-  reviews: '++id, word, rating, timestamp'
+  reviews: '++id, word, proficiency, date'
 });
+
+// ====== 熟练度常量 ======
+const PROFICIENCY = {
+  NONE: 0,           // 未学习
+  UNKNOWN: 1,        // 完全不熟悉
+  FAMILIAR: 2,       // 熟悉但是不记得
+  RECOGNIZE: 3,      // 看了才记住
+  BARELY: 4,         // 勉强记住
+  NORMAL: 5,         // 正常记住
+  MASTERED: 6        // 完全记住
+};
+
+const PROFICIENCY_NAMES = {
+  0: '未学习',
+  1: '完全不熟悉',
+  2: '熟悉但是不记得',
+  3: '看了才记住',
+  4: '勉强记住',
+  5: '正常记住',
+  6: '完全记住'
+};
+
+const PROFICIENCY_COLORS = {
+  0: '#a0aec0',
+  1: '#e53e3e',
+  2: '#dd6b20',
+  3: '#d69e2e',
+  4: '#3182ce',
+  5: '#38a169',
+  6: '#2f855a'
+};
 
 // ====== 数据初始化 ======
 
-// 从 data/netem_full_list.json 导入词频数据到 words 表（仅首次启动）
 async function initWordsData() {
   const count = await db.words.count();
   if (count > 0) {
@@ -30,7 +64,6 @@ async function initWordsData() {
   const resp = await fetch('data/netem_full_list.json');
   const raw = await resp.json();
 
-  // JSON 结构：{ "词汇表名": [ {序号, 词频, 单词, 释义, ...}, ... ] }
   const key = Object.keys(raw)[0];
   const rows = raw[key];
 
@@ -49,11 +82,44 @@ async function initWordsData() {
   return words.length;
 }
 
-// ====== words 表查询 ======
+// ====== 工具函数 ======
 
-async function getWordByRank(rank) {
-  return await db.words.where('rank').equals(rank).first();
+// 格式化释义：按词性分行显示
+// 输入: "address n.住址；致词 v.向...致词"  word="address"
+// 输出: "n.住址；致词\nv.向...致词"
+function formatDefinition(def, word) {
+  if (!def) return '';
+  let text = String(def).trim();
+  // 去掉开头的单词本身
+  if (word) {
+    const w = String(word).trim();
+    if (text.startsWith(w + ' ')) {
+      text = text.substring(w.length + 1);
+    } else if (text.startsWith(w)) {
+      text = text.substring(w.length);
+    }
+  }
+  text = text.trim();
+  // 常见词性标记：前有空格时切分（支持半角 . 和全角 ．）
+  // n v vt vi a adj adv pron prep conj art num aux int abbr
+  const posPattern = / (?=(?:n|v|vt|vi|a|adj|adv|pron|prep|conj|art|num|aux|int|abbr)[.．])/g;
+  const parts = text.split(posPattern).map(p => p.trim()).filter(p => p);
+  if (parts.length <= 1) return text;
+  return parts.join('\n');
 }
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function yesterdayStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ====== words 表查询 ======
 
 async function getTotalWords() {
   return await db.words.count();
@@ -66,7 +132,11 @@ async function getWordsByRange(fromRank, count) {
     .toArray();
 }
 
-async function searchWords(query, limit = 50) {
+async function getWordByRank(rank) {
+  return await db.words.where('rank').equals(rank).first();
+}
+
+async function searchWords(query, limit = 100) {
   if (!query) return [];
   const q = query.toLowerCase();
   const all = await db.words.toArray();
@@ -81,66 +151,110 @@ async function getCard(word) {
   return await db.cards.get(word);
 }
 
-async function getDueCards(now, limit = 100) {
-  return await db.cards
-    .where('due')
-    .belowOrEqual(now)
-    .limit(limit)
-    .toArray();
+async function getCardsByProficiency(prof) {
+  return await db.cards.where('proficiency').equals(prof).toArray();
 }
 
-async function getDueCount(now) {
-  return await db.cards.where('due').belowOrEqual(now).count();
+async function getAllCards() {
+  return await db.cards.toArray();
 }
 
 async function getCardCount() {
   return await db.cards.count();
 }
 
-async function putCard(card) {
-  await db.cards.put(card);
+// 设置单词熟练度（核心方法）
+async function setProficiency(word, proficiency) {
+  const today = todayStr();
+  const existing = await db.cards.get(word);
+
+  if (existing) {
+    existing.proficiency = proficiency;
+    existing.lastReview = today;
+    await db.cards.put(existing);
+  } else {
+    await db.cards.put({
+      word,
+      proficiency,
+      lastReview: today,
+      firstLearned: today
+    });
+  }
+
+  // 记录日志
+  await db.reviews.add({
+    word,
+    proficiency,
+    date: today
+  });
 }
 
-async function bulkPutCards(cards) {
-  await db.cards.bulkPut(cards);
+// 获取昨天标记为"不会"的单词（proficiency 1-3，lastReview=昨天）
+async function getYesterdayForgotten() {
+  const yesterday = yesterdayStr();
+  const cards = await db.cards
+    .where('lastReview')
+    .equals(yesterday)
+    .toArray();
+  // 只取熟练度低的（完全不熟悉/熟悉但不记得/看了才记住）
+  return cards.filter(c => c.proficiency >= 1 && c.proficiency <= 3);
+}
+
+// 获取所有未学习的单词（用于每日新词）
+async function getUnlearnedWords(limit) {
+  const allCards = await db.cards.toArray();
+  const learnedWords = new Set(allCards.map(c => c.word));
+
+  const total = await db.words.count();
+  const result = [];
+  const batchSize = 200;
+
+  for (let start = 1; start <= total && result.length < limit; start += batchSize) {
+    const batch = await getWordsByRange(start, batchSize);
+    for (const w of batch) {
+      if (!learnedWords.has(w.word)) {
+        result.push(w);
+        if (result.length >= limit) break;
+      }
+    }
+  }
+  return result;
 }
 
 // ====== reviews 表 ======
 
-async function addReview(word, rating) {
-  await db.reviews.add({
-    word,
-    rating,
-    timestamp: Date.now()
-  });
+async function getReviewsByDate(date) {
+  return await db.reviews.where('date').equals(date).toArray();
 }
 
 async function getRecentReviews(days = 30) {
-  const since = Date.now() - days * 24 * 3600 * 1000;
-  return await db.reviews.where('timestamp').above(since).toArray();
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceStr = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`;
+  return await db.reviews.where('date').aboveOrEqual(sinceStr).toArray();
 }
 
-async function getAllReviews() {
-  return await db.reviews.toArray();
-}
+// ====== 统计 ======
 
-// ====== 进度统计 ======
-
-// 获取学习进度统计
 async function getProgress() {
-  const [total, cards, dueCount] = await Promise.all([
+  const [total, cards] = await Promise.all([
     db.words.count(),
-    db.cards.toArray(),
-    getDueCount(Date.now())
+    db.cards.toArray()
   ]);
 
-  const learned = cards.length;
-  const mastered = cards.filter(c => c.state === 'mastered').length;
+  const stats = {
+    total,
+    learned: cards.length,
+    byProficiency: { 0: total - cards.length, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }
+  };
 
-  return { total, learned, due: dueCount, mastered };
+  for (const c of cards) {
+    stats.byProficiency[c.proficiency] = (stats.byProficiency[c.proficiency] || 0) + 1;
+  }
+
+  return stats;
 }
 
-// 计算已学词汇覆盖的真题词次
 async function getCoverage() {
   const cards = await db.cards.toArray();
   const learnedWords = new Set(cards.map(c => c.word));
@@ -164,32 +278,35 @@ async function getCoverage() {
 
 // ====== 危险操作 ======
 
-// 清空所有学习进度（保留 words 表）
 async function resetProgress() {
   await db.cards.clear();
   await db.reviews.clear();
   console.log('[db] 学习进度已重置');
 }
 
-// 导出 db 实例（供 store.js / scheduler.js 直接查询用）
-window.db = db;
-
 // 导出全局
+window.db = db;
 window.DB = {
+  PROFICIENCY,
+  PROFICIENCY_NAMES,
+  PROFICIENCY_COLORS,
+  todayStr,
+  yesterdayStr,
+  formatDefinition,
   initWordsData,
-  getWordByRank,
   getTotalWords,
   getWordsByRange,
+  getWordByRank,
   searchWords,
   getCard,
-  getDueCards,
-  getDueCount,
+  getCardsByProficiency,
+  getAllCards,
   getCardCount,
-  putCard,
-  bulkPutCards,
-  addReview,
+  setProficiency,
+  getYesterdayForgotten,
+  getUnlearnedWords,
+  getReviewsByDate,
   getRecentReviews,
-  getAllReviews,
   getProgress,
   getCoverage,
   resetProgress

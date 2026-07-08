@@ -1,36 +1,29 @@
-// CardView.js - 卡片视图组件（正面单词 + 翻转 + 评分按钮 + 发音）
+// CardView.js - 卡片视图组件（正面单词 + 翻转 + 6档熟练度按钮 + 发音）
 
 const CardView = {
   name: 'CardView',
-  setup() {
-    const { watch } = Vue;
+  setup(props, { emit }) {
+    const { watch, computed } = Vue;
     const store = window.Store;
 
     function flipCard() {
       store.flip();
     }
 
-    function rate(rating) {
-      store.rateCard(rating);
+    function rate(prof) {
+      store.rateCard(prof);
     }
 
     function skip() {
       store.skipCard();
     }
 
-    function getIntervalPreview(rating) {
-      if (!store.state.currentCard) return '';
-      return FSRS.getIntervalDescription(store.state.currentCard.card, rating);
-    }
-
-    // 朗读当前单词（不翻转卡片）
     function speakWord() {
       if (!store.state.currentCard) return;
-      const word = store.state.currentCard.wordData.word;
-      TTS.speak(word);
+      TTS.speak(store.state.currentCard.wordData.word);
     }
 
-    // 监听当前卡片变化，自动朗读新单词
+    // 监听卡片变化自动朗读
     watch(
       () => store.state.currentCard,
       (newCard) => {
@@ -40,13 +33,30 @@ const CardView = {
       }
     );
 
+    // 格式化释义：按词性分行
+    const formattedDef = computed(() => {
+      if (!store.state.currentCard) return '';
+      const wd = store.state.currentCard.wordData;
+      return DB.formatDefinition(wd.definition, wd.word);
+    });
+
+    const proficiencyLevels = [
+      { value: 1, name: '完全不熟悉', desc: '根本没印象', color: '#e53e3e' },
+      { value: 2, name: '熟悉但不记得', desc: '感觉背过但不记得', color: '#dd6b20' },
+      { value: 3, name: '看了才记住', desc: '看中文才想起', color: '#d69e2e' },
+      { value: 4, name: '勉强记住', desc: '想一会儿才想起', color: '#3182ce' },
+      { value: 5, name: '正常记住', desc: '偶尔忘记瞄两眼就想起', color: '#38a169' },
+      { value: 6, name: '完全记住', desc: 'am/the 这种基础词', color: '#2f855a' }
+    ];
+
     return {
       state: store.state,
       flipCard,
       rate,
       skip,
-      getIntervalPreview,
-      speakWord
+      speakWord,
+      proficiencyLevels,
+      formattedDef
     };
   },
   template: `
@@ -77,7 +87,7 @@ const CardView = {
         <!-- 背面：释义 -->
         <div class="card-face card-back">
           <div class="card-word" style="font-size:24px;">{{ state.currentCard.wordData.word }}</div>
-          <div class="card-definition">{{ state.currentCard.wordData.definition }}</div>
+          <div class="card-definition" :style="{ textAlign: state.settings.defAlign }">{{ formattedDef }}</div>
           <div class="card-variant" v-if="state.currentCard.wordData.variant">
             其他拼写：{{ state.currentCard.wordData.variant }}
           </div>
@@ -88,7 +98,7 @@ const CardView = {
         </div>
       </div>
 
-      <!-- 发音按钮（独立于卡片，避免 3D 翻转影响） -->
+      <!-- 发音按钮 -->
       <button class="speak-btn-large" @click="speakWord" title="朗读单词">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
@@ -98,28 +108,21 @@ const CardView = {
         <span>朗读</span>
       </button>
 
-      <!-- 评分按钮（翻转后显示） -->
-      <div class="rating-buttons" v-if="state.flipped">
-        <button class="rating-btn rating-again" @click.stop="rate(1)">
-          重学
-          <span class="interval">{{ getIntervalPreview(1) }}</span>
-        </button>
-        <button class="rating-btn rating-hard" @click.stop="rate(2)">
-          困难
-          <span class="interval">{{ getIntervalPreview(2) }}</span>
-        </button>
-        <button class="rating-btn rating-good" @click.stop="rate(3)">
-          良好
-          <span class="interval">{{ getIntervalPreview(3) }}</span>
-        </button>
-        <button class="rating-btn rating-easy" @click.stop="rate(4)">
-          简单
-          <span class="interval">{{ getIntervalPreview(4) }}</span>
+      <!-- 6档熟练度按钮（一直显示） -->
+      <div class="proficiency-grid">
+        <button v-for="level in proficiencyLevels"
+                :key="level.value"
+                class="prof-btn"
+                :style="{ background: level.color }"
+                @click.stop="rate(level.value)"
+                :title="level.desc">
+          <span class="prof-name">{{ level.name }}</span>
+          <span class="prof-desc">{{ level.desc }}</span>
         </button>
       </div>
 
       <!-- 跳过按钮 -->
-      <button v-if="!state.flipped" @click="skip"
+      <button @click="skip"
               style="background:none;border:none;color:var(--text-light);cursor:pointer;font-size:13px;">
         跳过
       </button>
@@ -128,7 +131,7 @@ const CardView = {
     <!-- 完成页面 -->
     <div class="complete-view" v-else>
       <div class="complete-icon">🎉</div>
-      <div class="complete-title">今日学习完成！</div>
+      <div class="complete-title">今日任务完成！</div>
       <div class="complete-stats">
         已完成 {{ state.queueIndex }} / {{ state.queue.length }} 张卡片
       </div>

@@ -1,35 +1,40 @@
 // store.js - 全局状态管理
-// 管理运行时状态：当前页面、学习队列、当前卡片、用户设置
-// 使用 Vue reactive 直接包装 state，确保所有修改都触发视图更新
 
 const { reactive } = Vue;
 
 const Store = {
   state: reactive({
     // 页面导航
-    currentPage: 'dashboard',  // dashboard | study | settings
+    currentPage: 'dashboard',  // dashboard | study | review | wordlist | settings
 
     // 数据状态
     initialized: false,
     totalWords: 0,
 
-    // 学习队列
+    // 主任务队列
     queue: [],
     queueIndex: 0,
-    studySession: null,  // { reviews, newWords, total }
+    dailyTask: null,  // { newWords, reviewWords, total }
 
     // 当前卡片
-    currentCard: null,   // { type: 'review'|'new', card/word, flipped, wordData }
+    currentCard: null,
     flipped: false,
 
+    // 第二任务（熟练度词表复习）
+    reviewTask: null,  // { 1:[], 2:[], 3:[], 4:[] }
+    reviewQueue: [],
+    reviewIndex: 0,
+
+    // 词表查看
+    wordListProf: null,  // 当前查看的熟练度词表（1-6）
+
     // 统计
-    stats: { total: 0, learned: 0, due: 0, mastered: 0 },
+    stats: { total: 0, learned: 0, byProficiency: {} },
     coverage: { coveredCount: 0, totalFrequency: 0, coveragePercent: 0 },
 
-    // 设置
+    // 用户设置（从 localStorage 读取）
     settings: {
-      newPerDay: 20,
-      desiredRetention: 0.9
+      defAlign: localStorage.getItem('setting_defAlign') || 'center'  // left | center
     }
   }),
 
@@ -37,43 +42,20 @@ const Store = {
   async init() {
     try {
       console.log('[store] 开始初始化...');
-      // 加载设置
-      this.loadSettings();
-
-      // 导入词频数据（首次启动）
       this.state.totalWords = await DB.initWordsData();
-      console.log('[store] 词频数据已加载，共', this.state.totalWords, '词');
-
-      // 更新调度器配置
-      Scheduler.updateConfig({ newPerDay: this.state.settings.newPerDay });
-
-      // 获取统计
       await this.refreshStats();
-      console.log('[store] 统计已刷新', this.state.stats);
-
       this.state.initialized = true;
       console.log('[store] 初始化完成');
     } catch (e) {
       console.error('[store] 初始化失败:', e);
-      // 即使失败也标记为已初始化，避免卡死
       this.state.initialized = true;
     }
   },
 
-  // ====== 设置持久化 ======
-  loadSettings() {
-    const saved = localStorage.getItem('vocab-settings');
-    if (saved) {
-      try {
-        Object.assign(this.state.settings, JSON.parse(saved));
-      } catch (e) {
-        console.warn('[store] 设置加载失败', e);
-      }
-    }
-  },
-
-  saveSettings() {
-    localStorage.setItem('vocab-settings', JSON.stringify(this.state.settings));
+  // ====== 更新设置（持久化） ======
+  updateSetting(key, value) {
+    this.state.settings[key] = value;
+    if (key === 'defAlign') localStorage.setItem('setting_defAlign', value);
   },
 
   // ====== 统计刷新 ======
@@ -82,114 +64,98 @@ const Store = {
     this.state.coverage = await DB.getCoverage();
   },
 
-  // ====== 学习会话 ======
-
-  // 开始学习
+  // ====== 主任务：开始每日学习 ======
   async startStudy() {
-    const session = await Scheduler.getTodayQueue();
-    this.state.studySession = session;
-    this.state.queue = Scheduler.buildStudyQueue(session.reviews, session.newWords);
+    const task = await Scheduler.getDailyTask();
+    this.state.dailyTask = task;
+    this.state.queue = Scheduler.buildStudyQueue(task.newWords, task.reviewWords);
     this.state.queueIndex = 0;
     this.state.flipped = false;
-
-    if (this.state.queue.length === 0) {
-      return false; // 没有需要学习的
-    }
-
     await this.loadCurrentCard();
-    return true;
+    return this.state.queue.length > 0;
   },
 
-  // 加载当前卡片数据
   async loadCurrentCard() {
     if (this.state.queueIndex >= this.state.queue.length) {
       this.state.currentCard = null;
       return;
     }
-
-    const item = this.state.queue[this.state.queueIndex];
-
-    if (item.type === 'new') {
-      // 新词：创建临时卡片
-      this.state.currentCard = {
-        type: 'new',
-        wordData: item.word,
-        card: FSRS.createNewCard(item.word.word)
-      };
-    } else {
-      // 复习卡：加载对应的词频数据
-      const wordData = await window.db.words.where('word').equals(item.card.word).first();
-      this.state.currentCard = {
-        type: 'review',
-        wordData: wordData,
-        card: item.card
-      };
-    }
+    this.state.currentCard = this.state.queue[this.state.queueIndex];
     this.state.flipped = false;
   },
 
-  // 翻转卡片
   flip() {
     this.state.flipped = !this.state.flipped;
   },
 
-  // 评分处理
-  async rateCard(rating) {
+  // 评分：设置熟练度并进入下一张
+  async rateCard(proficiency) {
     if (!this.state.currentCard) return;
-
-    const { card, wordData } = this.state.currentCard;
-    const now = Date.now();
-
-    // FSRS 更新
-    const updatedCard = FSRS.updateCard(card, rating, now);
-
-    // 写入数据库
-    await DB.putCard(updatedCard);
-    await DB.addReview(wordData.word, rating);
-
-    // 下一张
+    const word = this.state.currentCard.wordData.word;
+    await DB.setProficiency(word, proficiency);
     this.state.queueIndex++;
     await this.loadCurrentCard();
-
-    // 刷新统计
     await this.refreshStats();
   },
 
-  // 跳过当前卡片（不评分）
   async skipCard() {
     this.state.queueIndex++;
     await this.loadCurrentCard();
   },
 
-  // 判断是否完成
-  isComplete() {
-    return this.state.queueIndex >= this.state.queue.length;
+  // ====== 第二任务：复习熟练度词表 ======
+  async startReview(proficiencies) {
+    // proficiencies: 数组，如 [1,2,3,4] 或 [4]
+    const reviewTask = await Scheduler.getReviewTask();
+    this.state.reviewTask = reviewTask;
+
+    // 合并指定熟练度的词
+    const allWords = [];
+    for (const prof of proficiencies) {
+      for (const w of reviewTask[prof] || []) {
+        allWords.push({ type: 'review', wordData: w });
+      }
+    }
+
+    if (allWords.length === 0) {
+      return false;
+    }
+
+    this.state.reviewQueue = allWords;
+    this.state.reviewIndex = 0;
+    return true;
   },
 
-  // 获取当前进度
-  getProgress() {
-    return {
-      current: this.state.queueIndex + 1,
-      total: this.state.queue.length
-    };
+  // ====== 词表查看 ======
+  async loadWordList(proficiency) {
+    this.state.wordListProf = proficiency;
+    if (proficiency === 0) {
+      // 未学习：获取所有未学习的词（取前 200 个）
+      this.state.wordList = await DB.getUnlearnedWords(200);
+    } else {
+      const cards = await DB.getCardsByProficiency(proficiency);
+      const words = [];
+      for (const card of cards) {
+        const w = await db.words.where('word').equals(card.word).first();
+        if (w) words.push(w);
+      }
+      this.state.wordList = words;
+    }
+  },
+
+  // 修改单词熟练度（在词表页用）
+  async changeProficiency(word, newProf) {
+    await DB.setProficiency(word, newProf);
+    await this.refreshStats();
+    // 如果正在查看词表，重新加载
+    if (this.state.wordListProf !== null) {
+      await this.loadWordList(this.state.wordListProf);
+    }
   },
 
   // ====== 页面导航 ======
   navigate(page) {
     this.state.currentPage = page;
-  },
-
-  // ====== 设置更新 ======
-  updateSetting(key, value) {
-    this.state.settings[key] = value;
-    this.saveSettings();
-
-    if (key === 'newPerDay') {
-      Scheduler.updateConfig({ newPerDay: value });
-    }
-    if (key === 'desiredRetention') {
-      FSRS.PARAMS.desiredRetention = value;
-    }
   },
 
   // ====== 危险操作 ======

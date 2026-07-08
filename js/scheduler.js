@@ -1,123 +1,85 @@
-// scheduler.js - 每日复习队列调度
-// 负责混合新词和复习卡，生成今日学习队列
+// scheduler.js - 每日任务调度
+//
+// 规则（按需求文档）：
+//   每天任务 = 50 个新词（按词频从高到低） + 随机 30 个昨天不会的词
+//   第二任务 = 看熟练度为 1/2/3/4 的词表（勉强记住/看了才记住/熟悉但不记得/完全不熟悉）
 
-// ====== 配置 ======
 const SCHEDULER_CONFIG = {
-  newPerDay: 20,        // 每日新词数
-  reviewLimit: 100,     // 每日复习上限
-  dailyLimit: 120       // 每日总上限
+  newPerDay: 50,           // 每日新词数
+  reviewFromYesterday: 30  // 从昨天不会的词里随机抽 30 个
 };
 
-/**
- * 获取今日学习队列
- * @returns {Promise<{reviews: Array, newWords: Array, total: number}>}
- */
-async function getTodayQueue() {
-  const now = Date.now();
+// ====== 主任务：每日新词 + 昨天不会的 ======
 
-  // 1. 获取到期复习卡
-  const dueCards = await DB.getDueCards(now, SCHEDULER_CONFIG.reviewLimit);
+async function getDailyTask() {
+  // 1. 获取 50 个新词（按词频从高到低）
+  const newWords = await DB.getUnlearnedWords(SCHEDULER_CONFIG.newPerDay);
 
-  // 2. 计算今日还可学的新词数
-  //    规则：总上限 - 复习数 = 可用新词配额，但不超过 newPerDay
-  const newQuota = Math.max(0, Math.min(
-    SCHEDULER_CONFIG.newPerDay,
-    SCHEDULER_CONFIG.dailyLimit - dueCards.length
-  ));
+  // 2. 获取昨天不会的词，随机抽 30 个
+  const forgotten = await DB.getYesterdayForgotten();
+  const forgottenWords = [];
+  for (const card of forgotten) {
+    const wordData = await db.words.where('word').equals(card.word).first();
+    if (wordData) forgottenWords.push(wordData);
+  }
 
-  // 3. 获取新词：words 表中还没有对应 card 的词，按词频排名取
-  const newWords = await getNextNewWords(newQuota);
+  // 随机抽 30 个（如果不够 30 个就全取）
+  const reviewWords = shuffle(forgottenWords).slice(0, SCHEDULER_CONFIG.reviewFromYesterday);
 
   return {
-    reviews: dueCards,
-    newWords: newWords,
-    total: dueCards.length + newWords.length
+    newWords,      // 新词（按词频降序）
+    reviewWords,   // 昨天不会的随机 30 个
+    total: newWords.length + reviewWords.length
   };
 }
 
-/**
- * 获取下一批新词（按词频排名，跳过已学的）
- */
-async function getNextNewWords(count) {
-  if (count <= 0) return [];
+// ====== 第二任务：复习 4 个熟练度词表 ======
+// 熟练度 1-4：完全不熟悉/熟悉但不记得/看了才记住/勉强记住
 
-  // 获取所有已学过的 word 集合
-  const allCards = await DB.getCardCount();
-  let learnedWords = new Set();
-  if (allCards > 0) {
-    // 用 db 直接查（避免全量加载）
-    const cards = await window.db.cards.toArray();
-    learnedWords = new Set(cards.map(c => c.word));
-  }
-
-  // 按排名取词，跳过已学过的
-  const totalWords = await DB.getTotalWords();
-  const result = [];
-  const batchSize = Math.min(count * 3, 100); // 多取一些用于过滤
-
-  for (let start = 1; start <= totalWords && result.length < count; start += batchSize) {
-    const batch = await DB.getWordsByRange(start, batchSize);
-    for (const w of batch) {
-      if (!learnedWords.has(w.word)) {
-        result.push(w);
-        if (result.length >= count) break;
-      }
+async function getReviewTask() {
+  const result = { 1: [], 2: [], 3: [], 4: [] };
+  for (const prof of [1, 2, 3, 4]) {
+    const cards = await DB.getCardsByProficiency(prof);
+    for (const card of cards) {
+      const wordData = await db.words.where('word').equals(card.word).first();
+      if (wordData) result[prof].push(wordData);
     }
   }
-
   return result;
 }
 
-/**
- * 构建学习队列（复习 + 新词交替）
- * 复习卡优先，新词穿插在复习间隙
- */
-function buildStudyQueue(reviews, newWords) {
+// ====== 构建学习队列 ======
+
+function buildStudyQueue(newWords, reviewWords) {
   const queue = [];
 
-  // 复习卡按到期时间排序（最早到期的先复习）
-  reviews.sort((a, b) => a.due - b.due);
-
-  // 新词按词频排名排序（排名靠前的先学）
-  newWords.sort((a, b) => a.rank - b.rank);
-
-  // 交替排列：每 3 张复习卡后插 1 张新词
-  let reviewIdx = 0;
-  let newIdx = 0;
-  const reviewLen = reviews.length;
-  const newLen = newWords.length;
-
-  while (reviewIdx < reviewLen || newIdx < newLen) {
-    // 放 3 张复习卡
-    for (let i = 0; i < 3 && reviewIdx < reviewLen; i++) {
-      queue.push({ type: 'review', card: reviews[reviewIdx++] });
-    }
-    // 放 1 张新词
-    if (newIdx < newLen) {
-      queue.push({ type: 'new', word: newWords[newIdx++] });
-    }
+  // 新词在前（按词频降序）
+  for (const w of newWords) {
+    queue.push({ type: 'new', wordData: w });
   }
-
-  // 如果还有剩余的新词（没有复习卡时）
-  while (newIdx < newLen) {
-    queue.push({ type: 'new', word: newWords[newIdx++] });
+  // 复习词在后（已随机）
+  for (const w of reviewWords) {
+    queue.push({ type: 'review', wordData: w });
   }
 
   return queue;
 }
 
-/**
- * 更新调度配置
- */
-function updateConfig(config) {
-  Object.assign(SCHEDULER_CONFIG, config);
+// ====== 工具函数 ======
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 // 导出全局
 window.Scheduler = {
   CONFIG: SCHEDULER_CONFIG,
-  getTodayQueue,
-  getNextNewWords,
-  buildStudyQueue,
-  updateConfig
+  getDailyTask,
+  getReviewTask,
+  buildStudyQueue
 };
