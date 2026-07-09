@@ -42,6 +42,51 @@ const app = createApp({
       }
     }
 
+    // 导出学习数据为 JSON 文件下载
+    async function exportProgress() {
+      try {
+        const data = await DB.exportData();
+        const json = JSON.stringify(data);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `danci-backup-${DB.todayStr()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert(`导出成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`);
+      } catch (e) {
+        alert('导出失败：' + e.message);
+      }
+    }
+
+    // 触发文件选择
+    function triggerImport() {
+      document.getElementById('import-file-input').click();
+    }
+
+    // 从文件导入学习数据
+    async function importProgress(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (!confirm('导入会覆盖当前所有学习进度，确定继续吗？')) {
+        event.target.value = '';
+        return;
+      }
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        await DB.importData(data);
+        await store.refreshStats();
+        alert(`导入成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`);
+      } catch (e) {
+        alert('导入失败：' + e.message);
+      }
+      event.target.value = '';
+    }
+
     onMounted(async () => {
       await store.init();
     });
@@ -54,7 +99,10 @@ const app = createApp({
       onReview,
       onWordList,
       updateSetting,
-      resetProgress
+      resetProgress,
+      exportProgress,
+      triggerImport,
+      importProgress
     };
   },
   template: `
@@ -155,6 +203,20 @@ const app = createApp({
             <label>完全不熟悉</label>
             <span>{{ state.stats.byProficiency[1] || 0 }}</span>
           </div>
+
+          <h3 style="margin-top:20px;">数据管理</h3>
+          <div class="setting-row">
+            <label>导入 / 导出学习进度</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn-secondary" style="width:auto;padding:8px 14px;font-size:13px;" @click="exportProgress">
+                导出
+              </button>
+              <button class="btn-secondary" style="width:auto;padding:8px 14px;font-size:13px;" @click="triggerImport">
+                导入
+              </button>
+            </div>
+          </div>
+          <input type="file" id="import-file-input" accept=".json" style="display:none;" @change="importProgress">
 
           <div style="margin-top:20px;">
             <button class="btn-danger" @click="resetProgress">

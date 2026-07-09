@@ -211,6 +211,36 @@ async function resetProgress() {
   console.log('[db] 学习进度已重置');
 }
 
+// ====== 导入导出 ======
+
+// 导出学习数据：熟练度词表（cards）+ 复习日志（reviews）
+async function exportData() {
+  const [cards, reviews] = await Promise.all([
+    db.cards.toArray(),
+    db.reviews.toArray()
+  ]);
+  return {
+    version: 1,
+    exportDate: todayStr(),
+    cards,
+    reviews
+  };
+}
+
+// 导入学习数据：清空现有数据后恢复
+async function importData(data) {
+  if (!data || !data.cards || !data.reviews) {
+    throw new Error('数据格式不正确');
+  }
+  await db.transaction('rw', db.cards, db.reviews, async () => {
+    await db.cards.clear();
+    await db.reviews.clear();
+    if (data.cards.length > 0) await db.cards.bulkPut(data.cards);
+    if (data.reviews.length > 0) await db.reviews.bulkPut(data.reviews);
+  });
+  console.log(`[db] 导入完成：${data.cards.length} 张卡片，${data.reviews.length} 条日志`);
+}
+
 // 导出全局
 window.db = db;
 window.DB = {
@@ -225,5 +255,7 @@ window.DB = {
   getUnlearnedWords,
   getProgress,
   getCoverage,
-  resetProgress
+  resetProgress,
+  exportData,
+  importData
 };
