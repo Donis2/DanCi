@@ -20,37 +20,6 @@ db.version(1).stores({
   reviews: '++id, word, proficiency, date'
 });
 
-// ====== 熟练度常量 ======
-const PROFICIENCY = {
-  NONE: 0,           // 未学习
-  UNKNOWN: 1,        // 完全不熟悉
-  FAMILIAR: 2,       // 熟悉但是不记得
-  RECOGNIZE: 3,      // 看了才记住
-  BARELY: 4,         // 勉强记住
-  NORMAL: 5,         // 正常记住
-  MASTERED: 6        // 完全记住
-};
-
-const PROFICIENCY_NAMES = {
-  0: '未学习',
-  1: '完全不熟悉',
-  2: '熟悉但是不记得',
-  3: '看了才记住',
-  4: '勉强记住',
-  5: '正常记住',
-  6: '完全记住'
-};
-
-const PROFICIENCY_COLORS = {
-  0: '#a0aec0',
-  1: '#e53e3e',
-  2: '#dd6b20',
-  3: '#d69e2e',
-  4: '#3182ce',
-  5: '#38a169',
-  6: '#2f855a'
-};
-
 // ====== 数据初始化 ======
 
 async function initWordsData() {
@@ -121,10 +90,6 @@ function yesterdayStr() {
 
 // ====== words 表查询 ======
 
-async function getTotalWords() {
-  return await db.words.count();
-}
-
 async function getWordsByRange(fromRank, count) {
   return await db.words
     .where('rank')
@@ -132,35 +97,10 @@ async function getWordsByRange(fromRank, count) {
     .toArray();
 }
 
-async function getWordByRank(rank) {
-  return await db.words.where('rank').equals(rank).first();
-}
-
-async function searchWords(query, limit = 100) {
-  if (!query) return [];
-  const q = query.toLowerCase();
-  const all = await db.words.toArray();
-  return all
-    .filter(w => w.word.toLowerCase().includes(q) || (w.definition || '').includes(query))
-    .slice(0, limit);
-}
-
 // ====== cards 表 CRUD ======
-
-async function getCard(word) {
-  return await db.cards.get(word);
-}
 
 async function getCardsByProficiency(prof) {
   return await db.cards.where('proficiency').equals(prof).toArray();
-}
-
-async function getAllCards() {
-  return await db.cards.toArray();
-}
-
-async function getCardCount() {
-  return await db.cards.count();
 }
 
 // 设置单词熟练度（核心方法）
@@ -221,19 +161,6 @@ async function getUnlearnedWords(limit) {
   return result;
 }
 
-// ====== reviews 表 ======
-
-async function getReviewsByDate(date) {
-  return await db.reviews.where('date').equals(date).toArray();
-}
-
-async function getRecentReviews(days = 30) {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-  const sinceStr = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`;
-  return await db.reviews.where('date').aboveOrEqual(sinceStr).toArray();
-}
-
 // ====== 统计 ======
 
 async function getProgress() {
@@ -287,26 +214,15 @@ async function resetProgress() {
 // 导出全局
 window.db = db;
 window.DB = {
-  PROFICIENCY,
-  PROFICIENCY_NAMES,
-  PROFICIENCY_COLORS,
   todayStr,
   yesterdayStr,
   formatDefinition,
   initWordsData,
-  getTotalWords,
   getWordsByRange,
-  getWordByRank,
-  searchWords,
-  getCard,
   getCardsByProficiency,
-  getAllCards,
-  getCardCount,
   setProficiency,
   getYesterdayForgotten,
   getUnlearnedWords,
-  getReviewsByDate,
-  getRecentReviews,
   getProgress,
   getCoverage,
   resetProgress

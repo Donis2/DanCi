@@ -99,7 +99,7 @@ const CardView = {
         <!-- 背面：释义 -->
         <div class="card-face card-back">
           <div class="card-word" style="font-size:24px;">{{ state.currentCard.wordData.word }}</div>
-          <div class="card-definition" :style="{ textAlign: state.settings.defAlign }">{{ formattedDef }}</div>
+          <div class="card-definition" :style="{ textAlign: state.settings.defAlign }"><span class="def-inner">{{ formattedDef }}</span></div>
           <div class="card-variant" v-if="state.currentCard.wordData.variant">
             其他拼写：{{ state.currentCard.wordData.variant }}
           </div>

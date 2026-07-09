@@ -197,7 +197,7 @@ const WordList = {
           </div>
           <div class="card-face card-back">
             <div class="card-word" style="font-size:24px;">{{ currentWord.word }}</div>
-            <div class="card-definition" :style="{ textAlign: state.settings.defAlign }">{{ formattedDef }}</div>
+            <div class="card-definition" :style="{ textAlign: state.settings.defAlign }"><span class="def-inner">{{ formattedDef }}</span></div>
             <div class="card-variant" v-if="currentWord.variant">
               其他拼写：{{ currentWord.variant }}
             </div>

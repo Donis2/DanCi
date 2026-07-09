@@ -87,7 +87,7 @@ const ReviewView = {
         </div>
         <div class="card-face card-back">
           <div class="card-word" style="font-size:24px;">{{ getCurrentCard().wordData.word }}</div>
-          <div class="card-definition" :style="{ textAlign: state.settings.defAlign }">{{ formattedDef }}</div>
+          <div class="card-definition" :style="{ textAlign: state.settings.defAlign }"><span class="def-inner">{{ formattedDef }}</span></div>
           <div class="card-variant" v-if="getCurrentCard().wordData.variant">
             其他拼写：{{ getCurrentCard().wordData.variant }}
           </div>

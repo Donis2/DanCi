@@ -1,49 +1,87 @@
-// store.js - 全局状态管理
+﻿// store.js - 全局状态管理
 
 const { reactive } = Vue;
 
+// 从 localStorage 恢复今日学习进度
+function loadStudyProgress() {
+  try {
+    const saved = localStorage.getItem('study_progress');
+    if (!saved) return null;
+    const data = JSON.parse(saved);
+    const today = DB.todayStr();
+    if (data.studyDate === today && data.queue && data.queue.length > 0) {
+      return data;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[store] 恢复学习进度失败:', e);
+    return null;
+  }
+}
+
+function saveStudyProgress(state) {
+  try {
+    localStorage.setItem('study_progress', JSON.stringify({
+      studyDate: state.studyDate,
+      queue: state.queue,
+      queueIndex: state.queueIndex
+    }));
+  } catch (e) {
+    console.warn('[store] 保存学习进度失败:', e);
+  }
+}
+
+function clearStudyProgress() {
+  try { localStorage.removeItem('study_progress'); } catch (e) {}
+}
+
 const Store = {
   state: reactive({
-    // 页面导航
-    currentPage: 'dashboard',  // dashboard | study | review | wordlist | settings
-
-    // 数据状态
+    currentPage: 'dashboard',
     initialized: false,
     totalWords: 0,
 
-    // 主任务队列
+    // 主任务队列（init 时从 localStorage 恢复，初始为空）
     queue: [],
     queueIndex: 0,
-    dailyTask: null,  // { newWords, reviewWords, total }
+    dailyTask: null,
+    studyDate: '',
 
-    // 当前卡片
     currentCard: null,
     flipped: false,
 
-    // 第二任务（熟练度词表复习）
-    reviewTask: null,  // { 1:[], 2:[], 3:[], 4:[] }
+    reviewTask: null,
     reviewQueue: [],
     reviewIndex: 0,
 
-    // 词表查看
-    wordListProf: null,  // 当前查看的熟练度词表（1-6）
+    wordListProf: null,
 
-    // 统计
     stats: { total: 0, learned: 0, byProficiency: {} },
     coverage: { coveredCount: 0, totalFrequency: 0, coveragePercent: 0 },
 
-    // 用户设置（从 localStorage 读取）
     settings: {
-      defAlign: localStorage.getItem('setting_defAlign') || 'center'  // left | center
+      defAlign: (function() { try { return localStorage.getItem('setting_defAlign') || 'center'; } catch(e) { return 'center'; } })()
     }
   }),
 
-  // ====== 初始化 ======
   async init() {
     try {
       console.log('[store] 开始初始化...');
       this.state.totalWords = await DB.initWordsData();
       await this.refreshStats();
+
+      // 初始化完成后，恢复今日学习进度（不在顶层调用，避免加载顺序问题）
+      const saved = loadStudyProgress();
+      if (saved) {
+        this.state.queue = saved.queue;
+        this.state.queueIndex = saved.queueIndex;
+        this.state.studyDate = saved.studyDate;
+        if (this.state.queueIndex < this.state.queue.length) {
+          await this.loadCurrentCard();
+        }
+        console.log('[store] 恢复进度:', this.state.queueIndex + 1, '/', this.state.queue.length);
+      }
+
       this.state.initialized = true;
       console.log('[store] 初始化完成');
     } catch (e) {
@@ -52,32 +90,44 @@ const Store = {
     }
   },
 
-  // ====== 更新设置（持久化） ======
   updateSetting(key, value) {
     this.state.settings[key] = value;
-    if (key === 'defAlign') localStorage.setItem('setting_defAlign', value);
+    if (key === 'defAlign') { try { localStorage.setItem('setting_defAlign', value); } catch(e){} }
   },
 
-  // ====== 统计刷新 ======
   async refreshStats() {
     this.state.stats = await DB.getProgress();
     this.state.coverage = await DB.getCoverage();
   },
 
-  // ====== 主任务：开始每日学习 ======
   async startStudy() {
+    const today = DB.todayStr();
+
+    // 同一天内，队列还在且未完成，直接恢复进度（不重建队列）
+    if (this.state.studyDate === today &&
+        this.state.queue.length > 0 &&
+        this.state.queueIndex < this.state.queue.length) {
+      console.log('[store] 恢复今日学习进度:', this.state.queueIndex + 1, '/', this.state.queue.length);
+      await this.loadCurrentCard();
+      return true;
+    }
+
+    // 新的一天，或已完成，或首次开始：构建新队列
     const task = await Scheduler.getDailyTask();
     this.state.dailyTask = task;
+    this.state.studyDate = today;
     this.state.queue = Scheduler.buildStudyQueue(task.newWords, task.reviewWords);
     this.state.queueIndex = 0;
     this.state.flipped = false;
     await this.loadCurrentCard();
+    saveStudyProgress(this.state);
     return this.state.queue.length > 0;
   },
 
   async loadCurrentCard() {
     if (this.state.queueIndex >= this.state.queue.length) {
       this.state.currentCard = null;
+      clearStudyProgress();
       return;
     }
     this.state.currentCard = this.state.queue[this.state.queueIndex];
@@ -88,7 +138,6 @@ const Store = {
     this.state.flipped = !this.state.flipped;
   },
 
-  // 评分：设置熟练度并进入下一张
   async rateCard(proficiency) {
     if (!this.state.currentCard) return;
     const word = this.state.currentCard.wordData.word;
@@ -96,28 +145,27 @@ const Store = {
     this.state.queueIndex++;
     await this.loadCurrentCard();
     await this.refreshStats();
+    saveStudyProgress(this.state);
   },
 
   async skipCard() {
     this.state.queueIndex++;
     await this.loadCurrentCard();
+    saveStudyProgress(this.state);
   },
 
-  // 回看上一个单词
   async prevCard() {
     if (this.state.queueIndex > 0) {
       this.state.queueIndex--;
       await this.loadCurrentCard();
+      saveStudyProgress(this.state);
     }
   },
 
-  // ====== 第二任务：复习熟练度词表 ======
   async startReview(proficiencies) {
-    // proficiencies: 数组，如 [1,2,3,4] 或 [4]
     const reviewTask = await Scheduler.getReviewTask();
     this.state.reviewTask = reviewTask;
 
-    // 合并指定熟练度的词
     const allWords = [];
     for (const prof of proficiencies) {
       for (const w of reviewTask[prof] || []) {
@@ -134,11 +182,9 @@ const Store = {
     return true;
   },
 
-  // ====== 词表查看 ======
   async loadWordList(proficiency) {
     this.state.wordListProf = proficiency;
     if (proficiency === 0) {
-      // 未学习：获取所有未学习的词（取前 200 个）
       this.state.wordList = await DB.getUnlearnedWords(200);
     } else {
       const cards = await DB.getCardsByProficiency(proficiency);
@@ -151,28 +197,26 @@ const Store = {
     }
   },
 
-  // 修改单词熟练度（在词表页用）
   async changeProficiency(word, newProf) {
     await DB.setProficiency(word, newProf);
     await this.refreshStats();
-    // 如果正在查看词表，重新加载
     if (this.state.wordListProf !== null) {
       await this.loadWordList(this.state.wordListProf);
     }
   },
 
-  // ====== 页面导航 ======
   navigate(page) {
     this.state.currentPage = page;
   },
 
-  // ====== 危险操作 ======
   async resetAll() {
     await DB.resetProgress();
     await this.refreshStats();
     this.state.queue = [];
     this.state.queueIndex = 0;
     this.state.currentCard = null;
+    this.state.studyDate = '';
+    clearStudyProgress();
   }
 };
 
