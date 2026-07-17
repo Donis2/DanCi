@@ -399,6 +399,89 @@ const Sync = {
     });
   },
 
+  // ====== 自动同步事件监听 ======
+
+  // 注册浏览器事件，实现"切回前台拉取 + 关闭前推送"
+  // 应在 App 初始化时调用一次
+  _listenersRegistered: false,
+  registerAutoSync() {
+    if (this._listenersRegistered) return;
+    this._listenersRegistered = true;
+
+    // 1. 页面切回前台时：拉取远端最新进度（另一设备可能改了）
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.state.configured && !this.state.syncing) {
+        console.log('[sync] 页面切回前台，触发拉取');
+        // 静默拉取，不推送（避免无变化时浪费请求）
+        this.pullAndMerge(true).then(r => {
+          if (r.ok && r.changed > 0 && window.Store) {
+            window.Store.refreshStats();
+          }
+        });
+      }
+    });
+
+    // 2. 页面关闭/隐藏前：立即推送（用 sendBeacon 或同步请求兜底）
+    //    评分后 1.5 秒防抖可能没触发就关了，这里兜底
+    window.addEventListener('pagehide', () => {
+      if (this._debounceTimer) {
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = null;
+      }
+      if (this.state.configured && !this.state.syncing) {
+        console.log('[sync] 页面关闭，尝试推送');
+        // 用 Beacon API 异步推送，不阻塞关闭
+        this._pushViaBeacon();
+      }
+    });
+
+    // 3. 网络恢复时：如果之前同步失败，重试一次
+    window.addEventListener('online', () => {
+      if (this.state.configured && this.state.error) {
+        console.log('[sync] 网络恢复，重试同步');
+        this.syncNow();
+      }
+    });
+  },
+
+  // 用 sendBeacon 推送（页面关闭时的兜底，不阻塞）
+  // 注意：sendBeacon 只能发 POST，不能发 PATCH，所以这里用 fetch + keepalive
+  async _pushViaBeacon() {
+    try {
+      const token = this._getToken();
+      const gistId = this._getGistId();
+      if (!token || !gistId) return;
+      const cards = await db.cards.toArray();
+      let studyProgress = null;
+      try {
+        const sp = localStorage.getItem('study_progress');
+        if (sp) studyProgress = JSON.parse(sp);
+      } catch (e) {}
+      const data = {
+        version: 2,
+        syncDate: new Date().toISOString(),
+        cards,
+        studyProgress
+      };
+      // keepalive: true 让请求在页面关闭后仍能完成
+      await fetch(GIST_API + '/' + gistId, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          files: { [SYNC_FILE_NAME]: { content: JSON.stringify(data, null, 2) } }
+        }),
+        keepalive: true
+      });
+      this._setLastSync(this._nowStr());
+    } catch (e) {
+      console.warn('[sync] 关闭推送失败:', e);
+    }
+  },
+
   // ====== 绑定 / 解绑 ======
 
   // 首次绑定：验证 token → 创建 Gist（含当前进度）→ 保存凭证

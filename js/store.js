@@ -151,6 +151,21 @@ const Store = {
   async startStudy() {
     const today = DB.todayStr();
 
+    // 开始学习前先拉取云端最新进度（确保多设备进度一致）
+    if (window.Sync && window.Sync.state.configured && !window.Sync.state.syncing) {
+      console.log('[store] startStudy 前先拉取云端');
+      const r = await window.Sync.pullAndMerge(true);
+      // 如果拉到了远端 study_progress，重新加载到 state
+      if (r.ok && r.studyMerged) {
+        const sp = loadStudyProgress();
+        if (sp) {
+          this.state.queue = sp.queue;
+          this.state.queueIndex = sp.queueIndex;
+          this.state.studyDate = sp.studyDate;
+        }
+      }
+    }
+
     console.log('[store] startStudy 调用, today:', today,
       'state.studyDate:', this.state.studyDate,
       'state.queue.length:', this.state.queue.length,

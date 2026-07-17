@@ -202,6 +202,10 @@ const app = createApp({
           store._onPopState(event);
         });
       }
+      // 注册自动同步事件监听（切前台拉取 + 关闭前推送 + 网络恢复重试）
+      if (window.Sync && typeof window.Sync.registerAutoSync === 'function') {
+        window.Sync.registerAutoSync();
+      }
       await store.init();
     });
 
