@@ -99,6 +99,31 @@ const app = createApp({
       store.navigate('study');
     }
 
+    // 复制 Gist ID 到剪贴板
+    async function copyGistId() {
+      const id = window.Sync.state.gistId;
+      if (!id) return;
+      try {
+        await navigator.clipboard.writeText(id);
+        showToast('Gist ID 已复制', 'success', 2000);
+      } catch (e) {
+        // clipboard API 在非 HTTPS 或旧浏览器可能失败，fallback 到 textarea
+        const ta = document.createElement('textarea');
+        ta.value = id;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          showToast('Gist ID 已复制', 'success', 2000);
+        } catch (e2) {
+          showToast('复制失败，请手动选中复制', 'error', 3000);
+        }
+        document.body.removeChild(ta);
+      }
+    }
+
     async function onReview() {
       store.navigate('review');
     }
@@ -200,7 +225,8 @@ const app = createApp({
       bindNew,
       bindExisting,
       syncNow,
-      unbindSync
+      unbindSync,
+      copyGistId
     };
   },
   template: `
@@ -346,7 +372,10 @@ const app = createApp({
           <template v-else>
             <div class="setting-row">
               <label>Gist ID</label>
-              <span style="font-family:monospace;font-size:12px;">{{ syncState.gistId.slice(0,10) }}...</span>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-family:monospace;font-size:12px;word-break:break-all;">{{ syncState.gistId }}</span>
+                <button class="btn-small" @click="copyGistId" style="padding:4px 10px;font-size:11px;">复制</button>
+              </div>
             </div>
             <div class="setting-row">
               <label>上次同步</label>
