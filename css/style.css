@@ -691,6 +691,41 @@ html, body {
   }
 }
 
+/* 中大平板（≥800px）：卡片放大，按钮区域加宽 */
+@media (min-width: 800px) {
+  #app {
+    max-width: 880px;
+  }
+  .flashcard {
+    max-width: 680px;
+    height: 420px;
+  }
+  .proficiency-grid {
+    max-width: 680px;
+  }
+  .card-word {
+    font-size: 40px;
+  }
+  .prof-btn {
+    padding: 16px 10px;
+  }
+  .prof-name {
+    font-size: 15px;
+  }
+  .prof-desc {
+    font-size: 12px;
+  }
+  .speak-btn-large {
+    width: 200px;
+    font-size: 15px;
+    padding: 12px;
+  }
+  .speak-btn-large svg {
+    width: 28px;
+    height: 28px;
+  }
+}
+
 /* 平板横屏 / 小桌面（>900px）：双列布局 */
 @media (min-width: 900px) {
   #app {
@@ -732,14 +767,14 @@ html, body {
     max-width: 1180px;
   }
   .flashcard {
-    max-width: 640px;
-    height: 400px;
+    max-width: 760px;
+    height: 460px;
   }
   .proficiency-grid {
-    max-width: 640px;
+    max-width: 760px;
   }
   .card-word {
-    font-size: 42px;
+    font-size: 46px;
   }
   .wordlists-grid {
     grid-template-columns: repeat(4, 1fr);
