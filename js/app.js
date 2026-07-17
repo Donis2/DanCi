@@ -1,11 +1,80 @@
 // app.js - Vue 应用主入口
 
-const { createApp, onMounted } = Vue;
+const { createApp, onMounted, ref } = Vue;
 
 const app = createApp({
   setup() {
     const store = window.Store;
     const state = store.state;
+    const syncState = window.Sync.state;
+
+    // 同步表单输入
+    const newToken = ref('');
+    const existToken = ref('');
+    const existGistId = ref('');
+
+    // 轻量级 toast 提示（非阻塞，自动消失）
+    const toast = ref({ show: false, text: '', type: 'info' });
+    let toastTimer = null;
+    function showToast(text, type = 'info', duration = 3000) {
+      if (toastTimer) clearTimeout(toastTimer);
+      toast.value = { show: true, text, type };
+      toastTimer = setTimeout(() => {
+        toast.value.show = false;
+        toastTimer = null;
+      }, duration);
+    }
+
+    // 首次绑定（在这台设备创建同步）
+    async function bindNew() {
+      if (!newToken.value.trim()) {
+        showToast('请先输入 GitHub Token', 'error');
+        return;
+      }
+      try {
+        const result = await window.Sync.bindNew(newToken.value);
+        showToast('绑定成功：' + result.username + ' / 上传 ' + result.count + ' 张卡片', 'success', 4000);
+        newToken.value = '';
+      } catch (e) {
+        showToast('绑定失败: ' + e.message, 'error', 5000);
+      }
+    }
+
+    // 新设备接入（从云端拉取进度）
+    async function bindExisting() {
+      if (!existToken.value.trim() || !existGistId.value.trim()) {
+        showToast('请输入 Token 和 Gist ID', 'error');
+        return;
+      }
+      try {
+        const result = await window.Sync.bindExisting(existToken.value, existGistId.value);
+        showToast('接入成功，合并后共 ' + result.merged + ' 张卡片', 'success', 4000);
+        existToken.value = '';
+        existGistId.value = '';
+      } catch (e) {
+        showToast('接入失败: ' + e.message, 'error', 5000);
+      }
+    }
+
+    // 手动立即同步
+    async function syncNow() {
+      const result = await window.Sync.syncNow();
+      if (result.ok) {
+        showToast('同步成功，已推送 ' + result.count + ' 张卡片', 'success');
+      } else if (result.skipped) {
+        showToast('同步进行中，请稍后', 'info');
+      } else {
+        showToast('同步失败: ' + (result.error || '未知错误'), 'error', 5000);
+      }
+    }
+
+    // 退出同步（仅清除本地凭证，云端 Gist 保留）
+    function unbindSync() {
+      if (confirm('退出同步会清除本设备的同步凭证（Token 和 Gist ID）。云端进度保留，可随时重新接入。确定继续吗？')) {
+        window.Sync.unbind();
+        showToast('已退出同步', 'info');
+      }
+    }
 
     function navigate(page) {
       store.navigate(page);
@@ -38,7 +107,7 @@ const app = createApp({
     async function resetProgress() {
       if (confirm('确定要清空所有学习进度吗？此操作不可撤销！')) {
         await store.resetAll();
-        alert('学习进度已重置');
+        showToast('学习进度已重置', 'info');
       }
     }
 
@@ -56,9 +125,9 @@ const app = createApp({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        alert(`导出成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`);
+        showToast(`导出成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`, 'success', 4000);
       } catch (e) {
-        alert('导出失败：' + e.message);
+        showToast('导出失败: ' + e.message, 'error', 5000);
       }
     }
 
@@ -80,19 +149,34 @@ const app = createApp({
         const data = JSON.parse(text);
         await DB.importData(data);
         await store.refreshStats();
-        alert(`导入成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`);
+        showToast(`导入成功：${data.cards.length} 张卡片，${data.reviews.length} 条复习日志`, 'success', 4000);
       } catch (e) {
-        alert('导入失败：' + e.message);
+        showToast('导入失败: ' + e.message, 'error', 5000);
       }
       event.target.value = '';
     }
 
     onMounted(async () => {
+      // 注册浏览器历史回退监听（物理返回键 → 回到上一页）
+      if (typeof window !== 'undefined') {
+        // 初始进入时用 replaceState 占位，避免回退栈污染
+        if (typeof history !== 'undefined') {
+          history.replaceState({ page: 'dashboard' }, '', '#dashboard');
+        }
+        window.addEventListener('popstate', (event) => {
+          store._onPopState(event);
+        });
+      }
       await store.init();
     });
 
     return {
       state,
+      syncState,
+      toast,
+      newToken,
+      existToken,
+      existGistId,
       navigate,
       backToDashboard,
       onStudy,
@@ -102,11 +186,22 @@ const app = createApp({
       resetProgress,
       exportProgress,
       triggerImport,
-      importProgress
+      importProgress,
+      bindNew,
+      bindExisting,
+      syncNow,
+      unbindSync
     };
   },
   template: `
     <div id="app">
+      <!-- Toast 提示（非阻塞，自动消失） -->
+      <transition name="toast">
+        <div v-if="toast.show" class="toast" :class="'toast-' + toast.type">
+          {{ toast.text }}
+        </div>
+      </transition>
+
       <!-- 加载中 -->
       <div v-if="!state.initialized" style="display:flex;justify-content:center;align-items:center;min-height:100vh;">
         <div style="text-align:center;color:var(--text-light);">
@@ -120,6 +215,7 @@ const app = createApp({
         <nav class="nav">
           <div class="nav-title">考研词频背诵</div>
           <div class="nav-tabs">
+            <span v-if="syncState.configured && syncState.syncing" class="sync-indicator" title="正在与 GitHub Gist 同步">⟳ 同步中</span>
             <button class="nav-tab"
                     :class="{ active: state.currentPage === 'dashboard' }"
                     @click="navigate('dashboard')">
@@ -203,6 +299,68 @@ const app = createApp({
             <label>完全不熟悉</label>
             <span>{{ state.stats.byProficiency[1] || 0 }}</span>
           </div>
+
+          <h3 style="margin-top:20px;">云端同步</h3>
+
+          <!-- 未配置：显示绑定表单 -->
+          <template v-if="!syncState.configured">
+            <div class="sync-block">
+              <div class="sync-block-title">首次绑定（在这台设备创建同步）</div>
+              <input class="sync-input" v-model="newToken" type="password"
+                     placeholder="GitHub Personal Access Token (需 gist 权限)" />
+              <button class="btn-primary" style="width:auto;padding:8px 14px;font-size:13px;"
+                      @click="bindNew" :disabled="syncState.syncing">
+                {{ syncState.syncing ? '绑定中...' : '绑定并上传当前进度' }}
+              </button>
+            </div>
+
+            <div class="sync-block">
+              <div class="sync-block-title">新设备接入（从其他设备拉取进度）</div>
+              <input class="sync-input" v-model="existToken" type="password"
+                     placeholder="GitHub Token" />
+              <input class="sync-input" v-model="existGistId"
+                     placeholder="Gist ID（从已绑定设备获取）" />
+              <button class="btn-secondary" style="width:auto;padding:8px 14px;font-size:13px;"
+                      @click="bindExisting" :disabled="syncState.syncing">
+                {{ syncState.syncing ? '拉取中...' : '拉取并接入' }}
+              </button>
+            </div>
+
+            <div class="sync-tip">
+              Token 申请：GitHub Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token，勾选 <code>gist</code> 权限即可。
+              Token 仅存在本设备 localStorage，不会上传到任何服务器。
+            </div>
+          </template>
+
+          <!-- 已配置：显示状态和操作 -->
+          <template v-else>
+            <div class="setting-row">
+              <label>Gist ID</label>
+              <span style="font-family:monospace;font-size:12px;">{{ syncState.gistId.slice(0,10) }}...</span>
+            </div>
+            <div class="setting-row">
+              <label>上次同步</label>
+              <span>{{ syncState.lastSync || '从未' }}</span>
+            </div>
+            <div class="setting-row">
+              <label>当前状态</label>
+              <span>{{ syncState.syncing ? '同步中...' : (syncState.error ? '错误' : '已就绪') }}</span>
+            </div>
+            <div v-if="syncState.error" class="sync-error">{{ syncState.error }}</div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+              <button class="btn-secondary" style="width:auto;padding:8px 14px;font-size:13px;"
+                      @click="syncNow" :disabled="syncState.syncing">
+                {{ syncState.syncing ? '同步中...' : '立即同步' }}
+              </button>
+              <button class="btn-danger" style="width:auto;padding:8px 14px;font-size:13px;"
+                      @click="unbindSync">
+                退出同步
+              </button>
+            </div>
+            <div class="sync-tip" style="margin-top:10px;">
+              评分后会自动同步（防抖 1.5 秒）。打开 App 时会自动拉取云端最新进度。
+            </div>
+          </template>
 
           <h3 style="margin-top:20px;">数据管理</h3>
           <div class="setting-row">

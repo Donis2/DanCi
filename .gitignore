@@ -4,3 +4,14 @@ __pycache__/
 .DS_Store
 Thumbs.db
 node_modules/
+
+# 敏感凭证（绝不能提交）
+GistToken.txt
+*token*.txt
+*.secret
+
+# 工具生成
+.codegraph/
+
+# 大文件资料
+考研英语资料.zip

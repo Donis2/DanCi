@@ -1,4 +1,4 @@
-﻿// store.js - 全局状态管理
+// store.js - 全局状态管理
 
 const { reactive } = Vue;
 
@@ -82,8 +82,18 @@ const Store = {
         console.log('[store] 恢复进度:', this.state.queueIndex + 1, '/', this.state.queue.length);
       }
 
+      // 先标记初始化完成，让用户立即看到首页（不阻塞 UI）
       this.state.initialized = true;
       console.log('[store] 初始化完成');
+
+      // 异步触发云端同步，不阻塞页面渲染
+      // pullOnStart 内部会处理 syncing 锁，并在完成后刷新统计
+      if (window.Sync) {
+        // 故意不 await，让首页先渲染
+        window.Sync.pullOnStart().catch(e => {
+          console.warn('[store] 启动同步异常:', e);
+        });
+      }
     } catch (e) {
       console.error('[store] 初始化失败:', e);
       this.state.initialized = true;
@@ -205,7 +215,27 @@ const Store = {
     }
   },
 
-  navigate(page) {
+  // 导航到指定页面，同时更新浏览器历史（让物理返回键能回退）
+  // - skipHistory=true 时不 pushState（用于 popstate 回调中避免循环）
+  // - dashboard 是根页面：若从 dashboard 到 dashboard，不重复 push
+  navigate(page, skipHistory = false) {
+    const prev = this.state.currentPage;
+    this.state.currentPage = page;
+
+    // 更新历史栈
+    if (!skipHistory && typeof history !== 'undefined') {
+      if (prev === page) {
+        // 同页跳转：仅 replace 防止状态丢失
+        history.replaceState({ page }, '', '#' + page);
+      } else {
+        history.pushState({ page }, '', '#' + page);
+      }
+    }
+  },
+
+  // 处理浏览器后退/前进：仅更新当前页，不再改 history
+  _onPopState(event) {
+    const page = (event.state && event.state.page) || 'dashboard';
     this.state.currentPage = page;
   },
 

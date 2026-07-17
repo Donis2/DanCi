@@ -127,6 +127,12 @@ async function setProficiency(word, proficiency) {
     proficiency,
     date: today
   });
+
+  // 触发云端同步（防抖，1.5 秒内多次评分只推一次）
+  // 用可选链避免 Sync 未加载时报错
+  if (window.Sync && typeof window.Sync.debouncedSync === 'function') {
+    window.Sync.debouncedSync();
+  }
 }
 
 // 获取昨天标记为"不会"的单词（proficiency 1-3，lastReview=昨天）

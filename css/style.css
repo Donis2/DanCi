@@ -549,7 +549,107 @@ html, body {
   color: var(--primary);
 }
 
+/* ====== 云端同步 ====== */
+.toast {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: white;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  max-width: 90%;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.toast-info    { background: var(--accent); }
+.toast-success { background: var(--success); }
+.toast-error   { background: var(--danger); }
+
+.toast-enter-active, .toast-leave-active {
+  transition: all 0.25s ease;
+}
+.toast-enter-from, .toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px);
+}
+
+.sync-indicator {
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 12px;
+  margin-right: 6px;
+  animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.sync-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sync-block-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sync-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  font-family: monospace;
+  background: var(--card-bg);
+  color: var(--text);
+}
+
+.sync-input:focus {
+  border-color: var(--accent);
+}
+
+.sync-tip {
+  font-size: 11px;
+  color: var(--text-light);
+  line-height: 1.6;
+  padding: 10px 0;
+}
+
+.sync-tip code {
+  background: #edf2f7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--primary);
+}
+
+.sync-error {
+  color: var(--danger);
+  font-size: 12px;
+  padding: 8px 10px;
+  background: #fff5f5;
+  border-radius: 6px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
 /* ====== 响应式 ====== */
+/* 小屏手机：紧凑布局 */
 @media (max-width: 400px) {
   .proficiency-grid {
     grid-template-columns: 1fr 1fr;
@@ -562,5 +662,105 @@ html, body {
   }
   .card-word {
     font-size: 28px;
+  }
+}
+
+/* 大屏手机 / 小平板竖屏（>600px）：保持单列但更宽松 */
+@media (min-width: 600px) {
+  #app {
+    max-width: 760px;
+  }
+  .dashboard,
+  .settings-group,
+  .wordlist-view,
+  .card-container {
+    padding: 20px;
+  }
+  .flashcard {
+    max-width: 560px;
+    height: 360px;
+  }
+  .proficiency-grid {
+    max-width: 560px;
+  }
+  .nav {
+    padding: 16px 20px;
+  }
+  .nav-title {
+    font-size: 19px;
+  }
+}
+
+/* 平板横屏 / 小桌面（>900px）：双列布局 */
+@media (min-width: 900px) {
+  #app {
+    max-width: 960px;
+  }
+  .dashboard {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "coverage coverage"
+      "task1 task2"
+      "wordlists wordlists";
+    gap: 16px;
+    align-content: start;
+  }
+  /* dashboard 子元素顺序：coverage-card, task-card, task-card, wordlists-section */
+  .dashboard > :nth-child(1) { grid-area: coverage; }
+  .dashboard > :nth-child(2) { grid-area: task1; }
+  .dashboard > :nth-child(3) { grid-area: task2; }
+  .dashboard > :nth-child(4) { grid-area: wordlists; }
+  .wordlists-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  /* 词表列表双列 */
+  .wordlist-items {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  /* 设置页双列分组 */
+  .settings-group .setting-row {
+    padding: 14px 0;
+  }
+}
+
+/* 桌面（>1280px）：放大卡片，三列词表 */
+@media (min-width: 1280px) {
+  #app {
+    max-width: 1180px;
+  }
+  .flashcard {
+    max-width: 640px;
+    height: 400px;
+  }
+  .proficiency-grid {
+    max-width: 640px;
+  }
+  .card-word {
+    font-size: 42px;
+  }
+  .wordlists-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .wordlist-items {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .nav-title {
+    font-size: 20px;
+  }
+}
+
+/* 触摸设备优化：避免桌面 hover 残留 */
+@media (hover: none) {
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .flashcard:hover,
+  .speak-btn-large:hover,
+  .prof-btn:hover,
+  .wordlist-card:hover {
+    transform: none;
   }
 }
