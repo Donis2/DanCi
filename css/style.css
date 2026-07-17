@@ -266,28 +266,28 @@ html, body {
 }
 
 .card-word {
-  font-size: 36px;
+  font-size: 48px;
   font-weight: 700;
   color: var(--primary);
   margin-bottom: 12px;
 }
 
 .card-rank, .card-frequency {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-light);
   margin-bottom: 4px;
 }
 
 .card-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-light);
   margin-top: 24px;
   opacity: 0.7;
 }
 
 .card-definition {
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: 18px;
+  line-height: 1.7;
   color: var(--text);
   margin: 12px 0;
   text-align: center;
@@ -661,7 +661,7 @@ html, body {
     grid-template-columns: 1fr;
   }
   .card-word {
-    font-size: 28px;
+    font-size: 36px;
   }
 }
 
@@ -705,16 +705,16 @@ html, body {
   }
   /* 单词字号大幅放大，填满卡片 */
   .card-word {
-    font-size: 56px;
+    font-size: 68px;
   }
   /* 背面单词也放大（CardView 里背面用 inline style font-size:24px，这里覆盖） */
   .card-back .card-word {
-    font-size: 36px !important;
+    font-size: 44px !important;
   }
   /* 释义字号放大 */
   .card-definition {
-    font-size: 20px;
-    line-height: 1.7;
+    font-size: 24px;
+    line-height: 1.8;
   }
   /* 词频排名、出现次数字号放大 */
   .card-rank, .card-frequency {
@@ -801,13 +801,13 @@ html, body {
     max-width: 760px;
   }
   .card-word {
-    font-size: 64px;
+    font-size: 80px;
   }
   .card-back .card-word {
-    font-size: 40px !important;
+    font-size: 52px !important;
   }
   .card-definition {
-    font-size: 22px;
+    font-size: 28px;
   }
   .wordlists-grid {
     grid-template-columns: repeat(4, 1fr);
