@@ -412,6 +412,9 @@ const Sync = {
       // 保存凭证（pullAndMerge 需要用到）
       this._setToken(token);
       this._setGistId(gistId);
+      // 必须先标记 configured=true，否则 pullAndMerge 会因 configured 检查直接返回失败
+      this.state.configured = true;
+      this.state.gistId = gistId;
       // 拉取并合并
       const result = await this.pullAndMerge();
       if (!result.ok) {
@@ -422,8 +425,6 @@ const Sync = {
       }
       // 静默推送合并结果
       await this.pushLocal(true);
-      this.state.configured = true;
-      this.state.gistId = gistId;
       if (window.Store) await window.Store.refreshStats();
       return { ok: true, merged: result.merged };
     } catch (e) {
