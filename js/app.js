@@ -1,12 +1,22 @@
 // app.js - Vue 应用主入口
 
-const { createApp, onMounted, ref } = Vue;
+const { createApp, onMounted, ref, watch } = Vue;
 
 const app = createApp({
   setup() {
     const store = window.Store;
     const state = store.state;
     const syncState = window.Sync.state;
+
+    // 监听同步错误：错误变化时弹 toast（让用户知道同步失败）
+    watch(
+      () => syncState.error,
+      (newErr, oldErr) => {
+        if (newErr && newErr !== oldErr) {
+          showToast('同步失败: ' + newErr, 'error', 5000);
+        }
+      }
+    );
 
     // 同步表单输入
     const newToken = ref('');

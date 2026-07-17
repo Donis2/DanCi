@@ -87,16 +87,42 @@ const Store = {
       console.log('[store] 初始化完成');
 
       // 异步触发云端同步，不阻塞页面渲染
-      // pullOnStart 内部会处理 syncing 锁，并在完成后刷新统计
+      // 同步完成后：如果当前在学习/复习页且拉到了新进度，重建队列让用户看到最新数据
       if (window.Sync) {
-        // 故意不 await，让首页先渲染
-        window.Sync.pullOnStart().catch(e => {
+        window.Sync.pullOnStart((result) => {
+          if (!result.ok) {
+            // 同步失败：通过 toast 提示（Store 不直接调 UI，由 app.js 监听 state.error）
+            console.warn('[store] 启动同步失败:', result.error);
+            return;
+          }
+          // 同步成功且拉到了远端数据：如果用户已进入学习/复习页，刷新队列
+          if (result.pulled > 0 && (this.state.currentPage === 'study' || this.state.currentPage === 'review')) {
+            console.log('[store] 同步拉取到 ' + result.pulled + ' 张卡片，刷新当前队列');
+            this._refreshCurrentQueue();
+          }
+        }).catch(e => {
           console.warn('[store] 启动同步异常:', e);
         });
       }
     } catch (e) {
       console.error('[store] 初始化失败:', e);
       this.state.initialized = true;
+    }
+  },
+
+  // 同步后刷新当前学习/复习队列（让云端拉来的进度反映到 UI）
+  // 保留 queueIndex 不变（用户不会被打断），只更新卡片数据
+  _refreshCurrentQueue() {
+    if (this.state.currentPage === 'study' && this.state.queue.length > 0) {
+      // 重建当日队列会丢失进度，这里只刷新当前卡片的数据
+      // 实际上 cards 表的变化会通过 refreshStats 反映在统计数字上
+      // 队列中的卡片数据已固定（words 表），不需要重建
+      // 仅刷新统计即可
+      this.refreshStats();
+    } else if (this.state.currentPage === 'review' && this.state.reviewQueue.length > 0) {
+      this.refreshStats();
+    } else {
+      this.refreshStats();
     }
   },
 

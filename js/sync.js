@@ -312,38 +312,59 @@ const Sync = {
     return pullResult.ok ? pushResult : pullResult;
   },
 
-  // 防抖推送（评分后调用，1.5 秒内多次评分只推一次）
-  // 注意：实际推送前会检查 syncing 状态，避免与 pull 冲突
-  debouncedSync() {
+  // 防抖同步（评分后调用，1.5 秒内多次评分只同步一次）
+  // 流程：pull（拉取远端最新）→ merge → push（推送本地+远端合并结果）
+  // 注意：评分后本地已写入，所以必须先 pull 把远端的也拉下来合并，
+  //       再 push 合并结果，否则另一端的评分会被本地覆盖。
+  async debouncedSync() {
     if (!this.state.configured) return;
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(async () => {
       this._debounceTimer = null;
-      // pushLocal 内部会检查 syncing，必要时跳过
-      const result = await this.pushLocal(true);
-      // 如果因为同步中跳过了，1 秒后重试一次（启动 pull 应已完成）
-      if (result.skipped) {
+      // 先 pull：把远端的进度合并到本地（本地刚写的不会丢，LWW 取新）
+      const pullResult = await this.pullAndMerge(true);
+      // 再 push：把合并结果推到云端
+      const pushResult = await this.pushLocal(true);
+      // 如果因为同步中跳过了，1 秒后重试一次
+      if (pushResult.skipped) {
         setTimeout(() => this.pushLocal(true), 1000);
+      }
+      // 同步完成后刷新统计（pull 可能改了 cards 表）
+      if ((pullResult.ok || pushResult.ok) && window.Store) {
+        await window.Store.refreshStats();
       }
     }, SYNC_DEBOUNCE_MS);
   },
 
-  // 启动时同步：静默 pull → 仅在有变化时静默 push → 刷新统计
-  // 不阻塞页面渲染（应在 initialized=true 之后异步触发）
-  async pullOnStart() {
-    if (!this.state.configured) return;
+  // 启动时同步：pull → 仅在有变化时 push → 刷新统计
+  // 失败时通过回调通知 UI（不静默吞错），但仍然不阻塞页面渲染
+  // onResult(result) 回调可选，result = { ok, error, changed, localOnly, pulled }
+  async pullOnStart(onResult) {
+    if (!this.state.configured) {
+      if (onResult) onResult({ ok: true, skipped: true });
+      return;
+    }
     const pullResult = await this.pullAndMerge(true);
     if (!pullResult.ok) {
       console.warn('[sync] 启动拉取失败:', pullResult.error);
+      this.state.error = pullResult.error;  // 显示在设置页
+      if (onResult) onResult(pullResult);
       return;
     }
     console.log('[sync] 启动拉取完成，合并 ' + pullResult.changed + ' 张卡片，本地新增 ' + pullResult.localOnly + ' 张');
-    // 只有本地有远端没有的 card 时才需要 push（远端已合并到本地）
+    // 只有本地有远端没有的 card 时才需要 push
+    let pushOk = true;
     if (pullResult.localOnly > 0) {
       const pushResult = await this.pushLocal(true);
+      pushOk = pushResult.ok;
       if (pushResult.ok) console.log('[sync] 启动推送完成');
     }
     if (window.Store) await window.Store.refreshStats();
+    if (onResult) onResult({
+      ok: pushOk,
+      pulled: pullResult.changed,
+      localOnly: pullResult.localOnly
+    });
   },
 
   // ====== 绑定 / 解绑 ======
