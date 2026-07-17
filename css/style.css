@@ -691,7 +691,7 @@ html, body {
   }
 }
 
-/* 中大平板（≥800px）：卡片放大，按钮区域加宽 */
+/* 中大平板（≥800px）：卡片放大，内容字号同步放大填满卡片 */
 @media (min-width: 800px) {
   #app {
     max-width: 880px;
@@ -703,26 +703,53 @@ html, body {
   .proficiency-grid {
     max-width: 680px;
   }
+  /* 单词字号大幅放大，填满卡片 */
   .card-word {
-    font-size: 40px;
+    font-size: 56px;
   }
+  /* 背面单词也放大（CardView 里背面用 inline style font-size:24px，这里覆盖） */
+  .card-back .card-word {
+    font-size: 36px !important;
+  }
+  /* 释义字号放大 */
+  .card-definition {
+    font-size: 20px;
+    line-height: 1.7;
+  }
+  /* 词频排名、出现次数字号放大 */
+  .card-rank, .card-frequency {
+    font-size: 15px;
+  }
+  .card-hint {
+    font-size: 14px;
+    margin-top: 32px;
+  }
+  .card-variant, .card-category {
+    font-size: 14px;
+  }
+  /* 评分按钮放大 */
   .prof-btn {
-    padding: 16px 10px;
+    padding: 18px 12px;
   }
   .prof-name {
-    font-size: 15px;
+    font-size: 16px;
   }
   .prof-desc {
-    font-size: 12px;
+    font-size: 13px;
   }
+  /* 朗读按钮放大 */
   .speak-btn-large {
-    width: 200px;
-    font-size: 15px;
-    padding: 12px;
+    width: 220px;
+    font-size: 16px;
+    padding: 14px;
   }
   .speak-btn-large svg {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
+  }
+  /* 进度条区域字号 */
+  .card-container > div:first-child > div:first-child {
+    font-size: 14px;
   }
 }
 
@@ -774,7 +801,13 @@ html, body {
     max-width: 760px;
   }
   .card-word {
-    font-size: 46px;
+    font-size: 64px;
+  }
+  .card-back .card-word {
+    font-size: 40px !important;
+  }
+  .card-definition {
+    font-size: 22px;
   }
   .wordlists-grid {
     grid-template-columns: repeat(4, 1fr);
