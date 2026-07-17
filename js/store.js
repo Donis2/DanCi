@@ -151,6 +151,11 @@ const Store = {
   async startStudy() {
     const today = DB.todayStr();
 
+    console.log('[store] startStudy 调用, today:', today,
+      'state.studyDate:', this.state.studyDate,
+      'state.queue.length:', this.state.queue.length,
+      'state.queueIndex:', this.state.queueIndex);
+
     // 同一天内，队列还在且未完成，直接恢复进度（不重建队列）
     if (this.state.studyDate === today &&
         this.state.queue.length > 0 &&
@@ -160,6 +165,20 @@ const Store = {
       return true;
     }
 
+    // 防御：如果 state 没恢复但 localStorage 有，先从 localStorage 恢复
+    const saved = loadStudyProgress();
+    if (saved && saved.studyDate === today &&
+        saved.queue && saved.queue.length > 0 &&
+        saved.queueIndex < saved.queue.length) {
+      console.log('[store] state 未恢复，从 localStorage 恢复:', saved.queueIndex + 1, '/', saved.queue.length);
+      this.state.queue = saved.queue;
+      this.state.queueIndex = saved.queueIndex;
+      this.state.studyDate = saved.studyDate;
+      await this.loadCurrentCard();
+      return true;
+    }
+
+    console.log('[store] 构建新队列（首次开始或新的一天）');
     // 新的一天，或已完成，或首次开始：构建新队列
     const task = await Scheduler.getDailyTask();
     this.state.dailyTask = task;
