@@ -135,6 +135,26 @@ async function setProficiency(word, proficiency) {
   }
 }
 
+// 标记单词为"已见过"（跳过未评分时调用）
+// 写入 proficiency=0 的记录，让 getUnlearnedWords 能过滤掉它
+// 不写 reviews 日志（未评分不算复习）
+async function markSeen(word) {
+  const existing = await db.cards.get(word);
+  if (!existing) {
+    const today = todayStr();
+    await db.cards.put({
+      word,
+      proficiency: 0,
+      lastReview: today,
+      firstLearned: today
+    });
+    // 见过的词也触发同步，让其他设备能感知到
+    if (window.Sync && typeof window.Sync.debouncedSync === 'function') {
+      window.Sync.debouncedSync();
+    }
+  }
+}
+
 // 获取昨天标记为"不会"的单词（proficiency 1-3，lastReview=昨天）
 async function getYesterdayForgotten() {
   const yesterday = yesterdayStr();
@@ -175,13 +195,19 @@ async function getProgress() {
     db.cards.toArray()
   ]);
 
+  // proficiency >= 1 才算"已学"（0 表示见过但未评分，不计入已学）
+  const learnedCards = cards.filter(c => c.proficiency >= 1);
+  const seenCount = cards.filter(c => c.proficiency === 0).length;
+
   const stats = {
     total,
-    learned: cards.length,
+    learned: learnedCards.length,
+    seen: seenCount,
     byProficiency: { 0: total - cards.length, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }
   };
 
-  for (const c of cards) {
+  // 只统计 proficiency >= 1 的（0 不进 byProficiency，避免污染）
+  for (const c of learnedCards) {
     stats.byProficiency[c.proficiency] = (stats.byProficiency[c.proficiency] || 0) + 1;
   }
 
@@ -190,6 +216,7 @@ async function getProgress() {
 
 async function getCoverage() {
   const cards = await db.cards.toArray();
+  // 见过的词（proficiency >= 0）都算覆盖，因为用户已经接触过
   const learnedWords = new Set(cards.map(c => c.word));
 
   const allWords = await db.words.toArray();
@@ -257,6 +284,7 @@ window.DB = {
   getWordsByRange,
   getCardsByProficiency,
   setProficiency,
+  markSeen,
   getYesterdayForgotten,
   getUnlearnedWords,
   getProgress,

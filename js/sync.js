@@ -232,13 +232,38 @@ const Sync = {
       if (toPut.length > 0) {
         await db.cards.bulkPut(toPut);
       }
+
+      // 合并学习队列（study_progress）：取 queueIndex 更大的（进度更靠后）
+      // 仅当云端的 studyDate 是今天时才合并，否则跳过（昨天的队列没意义）
+      let studyMerged = false;
+      const remoteSP = remoteData.studyProgress;
+      if (remoteSP && remoteSP.studyDate === DB.todayStr() && remoteSP.queue && remoteSP.queue.length > 0) {
+        let localSP = null;
+        try {
+          const sp = localStorage.getItem('study_progress');
+          if (sp) localSP = JSON.parse(sp);
+        } catch (e) {}
+        // 本地无，或本地 queueIndex 比云端小 → 用云端的
+        if (!localSP ||
+            localSP.studyDate !== remoteSP.studyDate ||
+            (localSP.queueIndex || 0) < (remoteSP.queueIndex || 0)) {
+          try {
+            localStorage.setItem('study_progress', JSON.stringify(remoteSP));
+            studyMerged = true;
+          } catch (e) {
+            console.warn('[sync] 保存 study_progress 失败:', e);
+          }
+        }
+      }
+
       this._setLastSync(this._nowStr());
       return {
         ok: true,
         merged: mergedCount,
         changed: toPut.length,
         remoteCount: remoteCards.length,
-        localOnly
+        localOnly,
+        studyMerged
       };
     } catch (e) {
       if (!silent) this.state.error = e.message;
@@ -280,10 +305,17 @@ const Sync = {
     if (!silent) this.state.error = null;
     try {
       const cards = await db.cards.toArray();
+      // 同步当前学习队列（让新设备能从同一位置继续，而非从头开始）
+      let studyProgress = null;
+      try {
+        const sp = localStorage.getItem('study_progress');
+        if (sp) studyProgress = JSON.parse(sp);
+      } catch (e) {}
       const data = {
-        version: 1,
+        version: 2,
         syncDate: new Date().toISOString(),
-        cards
+        cards,
+        studyProgress
       };
       await this.updateGist(data);
       this._setLastSync(this._nowStr());

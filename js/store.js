@@ -87,17 +87,29 @@ const Store = {
       console.log('[store] 初始化完成');
 
       // 异步触发云端同步，不阻塞页面渲染
-      // 同步完成后：如果当前在学习/复习页且拉到了新进度，重建队列让用户看到最新数据
+      // 同步完成后：如果拉到了远端 study_progress，重新加载到 state
       if (window.Sync) {
         window.Sync.pullOnStart((result) => {
           if (!result.ok) {
-            // 同步失败：通过 toast 提示（Store 不直接调 UI，由 app.js 监听 state.error）
             console.warn('[store] 启动同步失败:', result.error);
             return;
           }
-          // 同步成功且拉到了远端数据：如果用户已进入学习/复习页，刷新队列
-          if (result.pulled > 0 && (this.state.currentPage === 'study' || this.state.currentPage === 'review')) {
-            console.log('[store] 同步拉取到 ' + result.pulled + ' 张卡片，刷新当前队列');
+          // 如果拉到了远端学习队列（study_progress），重新加载到 state
+          // 这样用户点"开始今日学习"时能从云端的位置继续
+          if (result.studyMerged) {
+            console.log('[store] 同步拉取到远端学习队列，重新加载到 state');
+            const sp = loadStudyProgress();
+            if (sp) {
+              this.state.queue = sp.queue;
+              this.state.queueIndex = sp.queueIndex;
+              this.state.studyDate = sp.studyDate;
+              if (this.state.currentPage === 'study' && this.state.queueIndex < this.state.queue.length) {
+                this.loadCurrentCard();
+              }
+            }
+          }
+          // 同步成功且拉到了远端数据：如果用户已进入学习/复习页，刷新统计
+          if (result.pulled > 0 || result.studyMerged) {
             this._refreshCurrentQueue();
           }
         }).catch(e => {
@@ -185,6 +197,11 @@ const Store = {
   },
 
   async skipCard() {
+    // 标记当前词为"已见过"，让其他设备不再把它当新词
+    if (this.state.currentCard) {
+      const word = this.state.currentCard.wordData.word;
+      await DB.markSeen(word);
+    }
     this.state.queueIndex++;
     await this.loadCurrentCard();
     saveStudyProgress(this.state);
