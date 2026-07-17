@@ -272,6 +272,12 @@ html, body {
   margin-bottom: 12px;
 }
 
+/* 背面单词（带释义时）比正面小一些，给释义留空间 */
+.card-word-back {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
 .card-rank, .card-frequency {
   font-size: 14px;
   color: var(--text-light);
@@ -707,9 +713,9 @@ html, body {
   .card-word {
     font-size: 68px;
   }
-  /* 背面单词也放大（CardView 里背面用 inline style font-size:24px，这里覆盖） */
-  .card-back .card-word {
-    font-size: 44px !important;
+  /* 背面单词也放大 */
+  .card-word-back {
+    font-size: 44px;
   }
   /* 释义字号放大 */
   .card-definition {
@@ -803,8 +809,8 @@ html, body {
   .card-word {
     font-size: 80px;
   }
-  .card-back .card-word {
-    font-size: 52px !important;
+  .card-word-back {
+    font-size: 52px;
   }
   .card-definition {
     font-size: 28px;
