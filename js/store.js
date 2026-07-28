@@ -324,6 +324,65 @@ const Store = {
     this.state.currentCard = null;
     this.state.studyDate = '';
     clearStudyProgress();
+  },
+
+  // 导出今日学习的所有新词（firstLearned === today）
+  // 即使今日任务已完成（queue 已清空），仍可从 cards 表查到
+  async exportTodayWords() {
+    const today = DB.todayStr();
+    const cards = await db.cards.where('firstLearned').equals(today).toArray();
+    if (cards.length === 0) return null;
+
+    const words = [];
+    for (const card of cards) {
+      const w = await db.words.where('word').equals(card.word).first();
+      if (w) {
+        words.push({
+          word: w.word,
+          rank: w.rank,
+          frequency: w.frequency,
+          definition: w.definition,
+          variant: w.variant,
+          category: w.category,
+          subcategory: w.subcategory,
+          proficiency: card.proficiency
+        });
+      }
+    }
+    // 按词频排名升序（高频词在前）
+    words.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+    return { date: today, words };
+  },
+
+  // 按熟练度导出单词：返回按熟练度分组的单词数据
+  // profs: 要导出的熟练度数组，如 [1, 2, 3] 或 [1,2,3,4,5,6]
+  async exportWordsByProficiency(profs) {
+    const result = {};
+    for (const prof of profs) {
+      const cards = await db.cards.where('proficiency').equals(prof).toArray();
+      const words = [];
+      for (const card of cards) {
+        const w = await db.words.where('word').equals(card.word).first();
+        if (w) {
+          words.push({
+            word: w.word,
+            rank: w.rank,
+            frequency: w.frequency,
+            definition: w.definition,
+            variant: w.variant,
+            category: w.category,
+            subcategory: w.subcategory,
+            proficiency: card.proficiency,
+            firstLearned: card.firstLearned,
+            lastReview: card.lastReview
+          });
+        }
+      }
+      // 按词频排名升序
+      words.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+      result[prof] = words;
+    }
+    return result;
   }
 };
 
