@@ -9,21 +9,30 @@ const WordList = {
     const searchQuery = ref('');
     const currentIndex = ref(-1);  // 当前查看的单词索引，-1 表示在列表模式
     const flipped = ref(false);
+    const tempWordSet = ref(new Set());   // 已在临时列表中的词
+    const showClearModal = ref(false);    // 清空临时确认弹窗
+
+    function refreshTempSet() {
+      return DB.getTempWordSet().then(set => { tempWordSet.value = set; });
+    }
 
     onMounted(async () => {
       if (store.state.wordListProf !== null) {
         await store.loadWordList(store.state.wordListProf);
       }
+      await refreshTempSet();
     });
 
     const profNames = {
       0: '未学习', 1: '完全不熟悉', 2: '熟悉但不记得', 3: '看了才记住',
-      4: '勉强记住', 5: '正常记住', 6: '完全记住'
+      4: '勉强记住', 5: '正常记住', 6: '完全记住',
+      temp: '临时'
     };
 
     const profColors = {
       0: '#a0aec0', 1: '#e53e3e', 2: '#dd6b20', 3: '#d69e2e',
-      4: '#3182ce', 5: '#38a169', 6: '#2f855a'
+      4: '#3182ce', 5: '#38a169', 6: '#2f855a',
+      temp: '#805ad5'
     };
 
     // 6档熟练度
@@ -58,6 +67,9 @@ const WordList = {
       if (!currentWord.value) return '';
       return DB.formatDefinition(currentWord.value.definition, currentWord.value.word);
     });
+
+    // 当前是否为「临时」词表
+    const isTempProf = computed(() => store.state.wordListProf === 'temp');
 
     // 列表模式预览释义：把换行替换为空格，单行显示
     function previewDef(def, word) {
@@ -105,6 +117,13 @@ const WordList = {
       }
     }
 
+    // 滑动翻页手势（左滑下一个，右滑上一个）
+    const swipe = window.createSwipe({ onPrev: prevWord, onNext: nextWord });
+    function onCardClick() {
+      if (swipe.shouldIgnoreClick()) return;
+      flipCard();
+    }
+
     // 评分：设置熟练度，然后自动跳下一个
     async function rate(newProf) {
       if (!currentWord.value) return;
@@ -132,6 +151,52 @@ const WordList = {
       emit('back');
     }
 
+    // ====== 临时词操作 ======
+    function isTemp(word) {
+      return tempWordSet.value.has(word);
+    }
+
+    async function addToTemp(word) {
+      await store.addToTemp(word);
+      const s = new Set(tempWordSet.value);
+      s.add(word);
+      tempWordSet.value = s;
+    }
+
+    async function removeFromTemp(word) {
+      await store.removeFromTemp(word);
+      const s = new Set(tempWordSet.value);
+      s.delete(word);
+      tempWordSet.value = s;
+    }
+
+    function askClearTemp() {
+      showClearModal.value = true;
+    }
+
+    async function confirmClearTemp() {
+      await store.clearTemp();
+      tempWordSet.value = new Set();
+      showClearModal.value = false;
+      currentIndex.value = -1;
+      flipped.value = false;
+    }
+
+    function cancelClearTemp() {
+      showClearModal.value = false;
+    }
+
+    // 加入临时并在卡片模式自动前进（无下一个则回到列表）
+    async function addToTempAndNext() {
+      if (!currentWord.value) return;
+      await addToTemp(currentWord.value.word);
+      if (currentIndex.value < filteredWords.value.length - 1) {
+        nextWord();
+      } else {
+        closeCard();
+      }
+    }
+
     return {
       state: store.state,
       searchQuery,
@@ -143,16 +208,29 @@ const WordList = {
       profColors,
       proficiencyLevels,
       formattedDef,
+      isTempProf,
+      isTemp,
+      showClearModal,
       previewDef,
       selectWord,
       flipCard,
       speakWord,
       nextWord,
       prevWord,
+      onTouchStart: swipe.onTouchStart,
+      onTouchMove: swipe.onTouchMove,
+      onTouchEnd: swipe.onTouchEnd,
+      onCardClick,
       rate,
       closeCard,
       speak,
-      back
+      back,
+      addToTemp,
+      removeFromTemp,
+      addToTempAndNext,
+      askClearTemp,
+      confirmClearTemp,
+      cancelClearTemp
     };
   },
   template: `
@@ -167,6 +245,12 @@ const WordList = {
           <span class="wordlist-total">{{ (state.wordList || []).length }} 词</span>
         </div>
       </div>
+
+      <!-- 临时页：清空全部按钮 -->
+      <button v-if="isTempProf && (state.wordList || []).length > 0"
+              class="temp-clear-btn" @click="askClearTemp">
+        清空全部临时词
+      </button>
 
       <!-- 卡片学习模式（点击单词后） -->
       <div v-if="currentWord" class="card-container" style="padding-top:0;">
@@ -188,7 +272,11 @@ const WordList = {
         </div>
 
         <!-- 卡片 -->
-        <div class="flashcard" :class="{ flipped: flipped }" @click="flipCard">
+        <div class="flashcard" :class="{ flipped: flipped }"
+             @click="onCardClick"
+             @touchstart.passive="onTouchStart"
+             @touchmove.passive="onTouchMove"
+             @touchend.passive="onTouchEnd">
           <div class="card-face">
             <div class="card-word">{{ currentWord.word }}</div>
             <div class="card-rank">词频排名 #{{ currentWord.rank }}</div>
@@ -231,6 +319,14 @@ const WordList = {
           </button>
         </div>
 
+        <!-- 加入临时（复制，不影响原熟练度） -->
+        <button v-if="isTemp(currentWord.word)" class="temp-added-btn-block" disabled>
+          🔖 已在临时列表
+        </button>
+        <button v-else class="temp-add-btn" @click="addToTempAndNext" title="复制到临时列表，当前熟练度保持不变">
+          🔖 加入临时
+        </button>
+
         <!-- 上一个 / 下一个 按钮 -->
         <div style="display:flex;gap:10px;width:100%;max-width:500px;">
           <button class="btn-secondary" style="flex:1;" @click="prevWord"
@@ -266,6 +362,13 @@ const WordList = {
                 <span v-if="word.category"> · {{ word.category }}</span>
               </div>
             </div>
+            <div class="wordlist-actions">
+              <button v-if="isTempProf" class="temp-remove-btn" @click.stop="removeFromTemp(word.word)">移除</button>
+              <template v-else>
+                <button v-if="isTemp(word.word)" class="temp-added-btn" disabled>已在临时</button>
+                <button v-else class="temp-add-mini" @click.stop="addToTemp(word.word)">加入临时</button>
+              </template>
+            </div>
             <div style="color:var(--text-light);font-size:20px;">›</div>
           </div>
         </div>
@@ -276,6 +379,18 @@ const WordList = {
           <div>{{ searchQuery ? '没有匹配的单词' : '这个词表还是空的' }}</div>
         </div>
       </template>
+
+      <!-- 清空临时确认弹窗 -->
+      <div v-if="showClearModal" class="modal-overlay" @click.self="cancelClearTemp">
+        <div class="modal-content">
+          <div class="modal-title">清空临时词？</div>
+          <div class="modal-desc">将从临时列表移除全部单词，但不会影响它们原有的熟练度。此操作不可撤销。</div>
+          <div class="modal-actions">
+            <button class="btn-secondary" style="flex:1;" @click="cancelClearTemp">取消</button>
+            <button class="btn-danger" style="flex:1;" @click="confirmClearTemp">清空</button>
+          </div>
+        </div>
+      </div>
     </div>
   `
 };

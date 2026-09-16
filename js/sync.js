@@ -189,6 +189,36 @@ const Sync = {
     return merged;
   },
 
+  // ====== 临时词（tempWords）同步 ======
+  // 临时词表整体采用 LWW：比较 updatedAt，取较新一方的完整列表。
+  // 这样加入/移除/清空都能正确传播，且不会丢失原熟练度。
+
+  // 构造临时词表的同步负载
+  async _getTempPayload() {
+    const words = await db.tempWords.toArray();
+    const updatedAt = (window.DB && typeof window.DB.getTempUpdated === 'function')
+      ? window.DB.getTempUpdated() : 0;
+    return { words, updatedAt };
+  },
+
+  // 合并远端临时词表（仅当远端更新时才覆盖本地）
+  async _mergeTemp(remoteData) {
+    if (!remoteData.temp || !Array.isArray(remoteData.temp.words)) return;
+    const remoteUpdated = remoteData.temp.updatedAt || 0;
+    const localUpdated = (window.DB && typeof window.DB.getTempUpdated === 'function')
+      ? window.DB.getTempUpdated() : 0;
+    if (remoteUpdated > localUpdated) {
+      await db.tempWords.clear();
+      if (remoteData.temp.words.length > 0) {
+        await db.tempWords.bulkPut(remoteData.temp.words);
+      }
+      if (window.DB && typeof window.DB.setTempUpdated === 'function') {
+        window.DB.setTempUpdated(remoteUpdated);
+      }
+      console.log('[sync] 合并远端临时词表:', remoteData.temp.words.length, '条');
+    }
+  },
+
   // ====== 同步流程 ======
 
   // 拉取云端 → 合并到本地（增量写回，只更新有变化的 card）
@@ -256,6 +286,9 @@ const Sync = {
         }
       }
 
+      // 合并临时词表（LWW，取 updatedAt 较新者）
+      await this._mergeTemp(remoteData);
+
       this._setLastSync(this._nowStr());
       return {
         ok: true,
@@ -315,7 +348,8 @@ const Sync = {
         version: 2,
         syncDate: new Date().toISOString(),
         cards,
-        studyProgress
+        studyProgress,
+        temp: await this._getTempPayload()
       };
       await this.updateGist(data);
       this._setLastSync(this._nowStr());
@@ -461,7 +495,8 @@ const Sync = {
         version: 2,
         syncDate: new Date().toISOString(),
         cards,
-        studyProgress
+        studyProgress,
+        temp: await this._getTempPayload()
       };
       // keepalive: true 让请求在页面关闭后仍能完成
       await fetch(GIST_API + '/' + gistId, {
@@ -496,7 +531,8 @@ const Sync = {
       const data = {
         version: 1,
         syncDate: new Date().toISOString(),
-        cards
+        cards,
+        temp: await this._getTempPayload()
       };
       const gistId = await this.createGist(token, data);
       this._setToken(token);

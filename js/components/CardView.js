@@ -33,6 +33,18 @@ const CardView = {
       store.prevCard();
     }
 
+    // 滑动翻页手势（左滑下一个，右滑上一个）
+    const swipe = window.createSwipe({ onPrev: prevWord, onNext: nextWord });
+    function onCardClick() {
+      if (swipe.shouldIgnoreClick()) return;
+      flipCard();
+    }
+
+    // 加入临时（复制语义，不改原熟练度），并前进到下一个
+    function addTemp() {
+      store.rateCardTemp();
+    }
+
     // 监听卡片变化自动朗读
     watch(
       () => store.state.currentCard,
@@ -67,6 +79,11 @@ const CardView = {
       speakWord,
       nextWord,
       prevWord,
+      onTouchStart: swipe.onTouchStart,
+      onTouchMove: swipe.onTouchMove,
+      onTouchEnd: swipe.onTouchEnd,
+      onCardClick,
+      addTemp,
       proficiencyLevels,
       formattedDef
     };
@@ -88,7 +105,11 @@ const CardView = {
       </div>
 
       <!-- 卡片 -->
-      <div class="flashcard" :class="{ flipped: state.flipped }" @click="flipCard">
+      <div class="flashcard" :class="{ flipped: state.flipped }"
+           @click="onCardClick"
+           @touchstart.passive="onTouchStart"
+           @touchmove.passive="onTouchMove"
+           @touchend.passive="onTouchEnd">
         <!-- 正面：单词 -->
         <div class="card-face">
           <div class="card-word">{{ state.currentCard.wordData.word }}</div>
@@ -120,7 +141,7 @@ const CardView = {
         <span>朗读</span>
       </button>
 
-      <!-- 6档熟练度按钮（一直显示） -->
+      <!-- 评分按钮（6档熟练度 + 临时） -->
       <div class="proficiency-grid">
         <button v-for="level in proficiencyLevels"
                 :key="level.value"
@@ -130,6 +151,12 @@ const CardView = {
                 :title="level.desc">
           <span class="prof-name">{{ level.name }}</span>
           <span class="prof-desc">{{ level.desc }}</span>
+        </button>
+        <!-- 临时：复制语义，保留原熟练度，额外复制一份到临时 -->
+        <button class="prof-btn temp-prof-btn" @click.stop="addTemp"
+                title="复制到临时列表，当前熟练度保持不变">
+          <span class="prof-name">🔖 临时（复制）</span>
+          <span class="prof-desc">保留原熟练度，不移动</span>
         </button>
       </div>
 

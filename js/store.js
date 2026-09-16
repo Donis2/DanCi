@@ -58,6 +58,7 @@ const Store = {
 
     stats: { total: 0, learned: 0, byProficiency: {} },
     coverage: { coveredCount: 0, totalFrequency: 0, coveragePercent: 0 },
+    tempCount: 0,
 
     settings: {
       defAlign: (function() { try { return localStorage.getItem('setting_defAlign') || 'center'; } catch(e) { return 'center'; } })()
@@ -68,6 +69,8 @@ const Store = {
     try {
       console.log('[store] 开始初始化...');
       this.state.totalWords = await DB.initWordsData();
+      // 修复旧版遗留的非法熟练度（把"临时"错存进 cards 的历史脏数据）
+      await DB.repairInvalidProficiency();
       await this.refreshStats();
 
       // 初始化完成后，恢复今日学习进度（不在顶层调用，避免加载顺序问题）
@@ -146,6 +149,7 @@ const Store = {
   async refreshStats() {
     this.state.stats = await DB.getProgress();
     this.state.coverage = await DB.getCoverage();
+    this.state.tempCount = await DB.getTempCount();
   },
 
   async startStudy() {
@@ -230,6 +234,17 @@ const Store = {
     saveStudyProgress(this.state);
   },
 
+  // 加入临时并前进（不评分、不改原熟练度，仅复制进临时列表）
+  async rateCardTemp() {
+    if (!this.state.currentCard) return;
+    const word = this.state.currentCard.wordData.word;
+    await DB.addTempWord(word);
+    this.state.queueIndex++;
+    await this.loadCurrentCard();
+    await this.refreshStats();
+    saveStudyProgress(this.state);
+  },
+
   async skipCard() {
     // 标记当前词为"已见过"，让其他设备不再把它当新词
     if (this.state.currentCard) {
@@ -271,7 +286,9 @@ const Store = {
 
   async loadWordList(proficiency) {
     this.state.wordListProf = proficiency;
-    if (proficiency === 0) {
+    if (proficiency === 'temp') {
+      this.state.wordList = await DB.getTempWords();
+    } else if (proficiency === 0) {
       this.state.wordList = await DB.getUnlearnedWords(200);
     } else {
       const cards = await DB.getCardsByProficiency(proficiency);
@@ -289,6 +306,30 @@ const Store = {
     await this.refreshStats();
     if (this.state.wordListProf !== null) {
       await this.loadWordList(this.state.wordListProf);
+    }
+  },
+
+  // 加入临时（复制语义，原熟练度不变）
+  async addToTemp(word) {
+    await DB.addTempWord(word);
+    await this.refreshStats();
+  },
+
+  // 从临时移除单个单词
+  async removeFromTemp(word) {
+    await DB.removeTempWord(word);
+    await this.refreshStats();
+    if (this.state.wordListProf === 'temp') {
+      await this.loadWordList('temp');
+    }
+  },
+
+  // 清空全部临时词
+  async clearTemp() {
+    await DB.clearTempWords();
+    await this.refreshStats();
+    if (this.state.wordListProf === 'temp') {
+      await this.loadWordList('temp');
     }
   },
 

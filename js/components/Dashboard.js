@@ -219,7 +219,8 @@ const Dashboard = {
       { value: 3, name: '看了才记住', desc: '看中文才想起' },
       { value: 4, name: '勉强记住', desc: '想一会儿才想起' },
       { value: 5, name: '正常记住', desc: '偶尔忘记瞄两眼就想起' },
-      { value: 6, name: '完全记住', desc: 'am/the 这种基础词' }
+      { value: 6, name: '完全记住', desc: 'am/the 这种基础词' },
+      { value: 'temp', name: '临时', desc: '复制暂存，不动原熟练度' }
     ];
 
     return {
@@ -335,12 +336,14 @@ const Dashboard = {
   `,
   methods: {
     getProfCount(prof) {
+      if (prof === 'temp') return this.state.tempCount || 0;
       return this.state.stats.byProficiency[prof] || 0;
     },
     getProfColor(prof) {
       const colors = {
         0: '#a0aec0', 1: '#e53e3e', 2: '#dd6b20', 3: '#d69e2e',
-        4: '#3182ce', 5: '#38a169', 6: '#2f855a'
+        4: '#3182ce', 5: '#38a169', 6: '#2f855a',
+        temp: '#805ad5'
       };
       return colors[prof] || '#a0aec0';
     }

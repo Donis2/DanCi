@@ -20,6 +20,11 @@ db.version(1).stores({
   reviews: '++id, word, proficiency, date'
 });
 
+// v2：新增 tempWords 表（临时词，复制语义，独立于 cards 表）
+db.version(2).stores({
+  tempWords: 'word, addedAt'
+});
+
 // ====== 数据初始化 ======
 
 async function initWordsData() {
@@ -155,6 +160,93 @@ async function markSeen(word) {
   }
 }
 
+// ====== 数据修复 ======
+// 旧版曾把"临时"当成一个熟练度存入 cards.proficiency，导致单词从原熟练度消失。
+// 这里扫描 proficiency 不在 0-6 的记录，从 reviews 日志找回最后一次合法评分恢复。
+async function repairInvalidProficiency() {
+  const valid = new Set([0, 1, 2, 3, 4, 5, 6]);
+  const cards = await db.cards.toArray();
+  let fixed = 0;
+  for (const card of cards) {
+    if (valid.has(card.proficiency)) continue;
+    // reviews 用自增 id，id 越大越新；取最后一次合法评分
+    const logs = await db.reviews.where('word').equals(card.word).toArray();
+    logs.sort((a, b) => (b.id || 0) - (a.id || 0));
+    const lastValid = logs.find(l => valid.has(l.proficiency));
+    card.proficiency = lastValid ? lastValid.proficiency : 0;
+    card.lastReview = lastValid ? lastValid.date : card.lastReview;
+    await db.cards.put(card);
+    fixed++;
+  }
+  if (fixed > 0) console.log(`[db] 已修复非法熟练度 ${fixed} 条`);
+}
+
+// ====== 临时词（tempWords）======
+// 临时是"复制"语义：把词加进 tempWords，不改变 cards 表的原熟练度。
+// 原熟练度保留在 cards 表，临时词独立存储，所以删除/清空临时不影响熟练度。
+
+function tempTouch() {
+  try { localStorage.setItem('temp_updated', String(Date.now())); } catch (e) {}
+}
+
+function getTempUpdated() {
+  try { return parseInt(localStorage.getItem('temp_updated') || '0', 10); } catch (e) { return 0; }
+}
+
+function setTempUpdated(ts) {
+  try { localStorage.setItem('temp_updated', String(ts)); } catch (e) {}
+}
+
+// 加入临时（已存在则忽略，重复加入不刷新时间戳）
+async function addTempWord(word) {
+  const exists = await db.tempWords.get(word);
+  if (exists) return;
+  await db.tempWords.put({ word, addedAt: Date.now() });
+  tempTouch();
+  if (window.Sync && typeof window.Sync.debouncedSync === 'function') {
+    window.Sync.debouncedSync();
+  }
+}
+
+// 从临时移除单个单词
+async function removeTempWord(word) {
+  await db.tempWords.delete(word);
+  tempTouch();
+  if (window.Sync && typeof window.Sync.debouncedSync === 'function') {
+    window.Sync.debouncedSync();
+  }
+}
+
+// 清空全部临时词
+async function clearTempWords() {
+  await db.tempWords.clear();
+  tempTouch();
+  if (window.Sync && typeof window.Sync.debouncedSync === 'function') {
+    window.Sync.debouncedSync();
+  }
+}
+
+// 获取临时词对应的完整单词数据（join words 表）
+async function getTempWords() {
+  const temps = await db.tempWords.toArray();
+  const words = [];
+  for (const t of temps) {
+    const w = await db.words.where('word').equals(t.word).first();
+    if (w) words.push(w);
+  }
+  return words;
+}
+
+async function getTempCount() {
+  return await db.tempWords.count();
+}
+
+// 返回临时词集合（用于 UI 判断某个词是否已在临时）
+async function getTempWordSet() {
+  const temps = await db.tempWords.toArray();
+  return new Set(temps.map(t => t.word));
+}
+
 // 获取昨天标记为"不会"的单词（proficiency 1-3，lastReview=昨天）
 async function getYesterdayForgotten() {
   const yesterday = yesterdayStr();
@@ -246,17 +338,19 @@ async function resetProgress() {
 
 // ====== 导入导出 ======
 
-// 导出学习数据：熟练度词表（cards）+ 复习日志（reviews）
+// 导出学习数据：熟练度词表（cards）+ 复习日志（reviews）+ 临时词（tempWords）
 async function exportData() {
-  const [cards, reviews] = await Promise.all([
+  const [cards, reviews, tempWords] = await Promise.all([
     db.cards.toArray(),
-    db.reviews.toArray()
+    db.reviews.toArray(),
+    db.tempWords.toArray()
   ]);
   return {
     version: 1,
     exportDate: todayStr(),
     cards,
-    reviews
+    reviews,
+    tempWords
   };
 }
 
@@ -265,13 +359,15 @@ async function importData(data) {
   if (!data || !data.cards || !data.reviews) {
     throw new Error('数据格式不正确');
   }
-  await db.transaction('rw', db.cards, db.reviews, async () => {
+  await db.transaction('rw', db.cards, db.reviews, db.tempWords, async () => {
     await db.cards.clear();
     await db.reviews.clear();
+    await db.tempWords.clear();
     if (data.cards.length > 0) await db.cards.bulkPut(data.cards);
     if (data.reviews.length > 0) await db.reviews.bulkPut(data.reviews);
+    if (data.tempWords && data.tempWords.length > 0) await db.tempWords.bulkPut(data.tempWords);
   });
-  console.log(`[db] 导入完成：${data.cards.length} 张卡片，${data.reviews.length} 条日志`);
+  console.log(`[db] 导入完成：${data.cards.length} 张卡片，${data.reviews.length} 条日志，${(data.tempWords || []).length} 条临时词`);
 }
 
 // 导出全局
@@ -289,7 +385,16 @@ window.DB = {
   getUnlearnedWords,
   getProgress,
   getCoverage,
+  repairInvalidProficiency,
   resetProgress,
   exportData,
-  importData
+  importData,
+  addTempWord,
+  removeTempWord,
+  clearTempWords,
+  getTempWords,
+  getTempCount,
+  getTempWordSet,
+  getTempUpdated,
+  setTempUpdated
 };

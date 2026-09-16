@@ -30,9 +30,34 @@ const ReviewView = {
       store.state.flipped = false;
     }
 
+    // 上一个复习词
+    function prevCard() {
+      if (store.state.reviewIndex > 0) {
+        store.state.reviewIndex--;
+        store.state.flipped = false;
+      }
+    }
+
+    // 滑动翻页手势（左滑下一个，右滑上一个）
+    const swipe = window.createSwipe({ onPrev: prevCard, onNext: skip });
+    function onCardClick() {
+      if (swipe.shouldIgnoreClick()) return;
+      flip();
+    }
+
     function speakWord() {
       const card = getCurrentCard();
       if (card) TTS.speak(card.wordData.word);
+    }
+
+    // 加入临时（复制语义，不改原熟练度），并前进到下一个
+    async function addTemp() {
+      const card = getCurrentCard();
+      if (!card) return;
+      await DB.addTempWord(card.wordData.word);
+      store.state.reviewIndex++;
+      store.state.flipped = false;
+      await store.refreshStats();
     }
 
     const proficiencyLevels = [
@@ -57,6 +82,11 @@ const ReviewView = {
       flip,
       rate,
       skip,
+      onTouchStart: swipe.onTouchStart,
+      onTouchMove: swipe.onTouchMove,
+      onTouchEnd: swipe.onTouchEnd,
+      onCardClick,
+      addTemp,
       speakWord,
       proficiencyLevels,
       formattedDef
@@ -78,7 +108,11 @@ const ReviewView = {
       </div>
 
       <!-- 卡片 -->
-      <div class="flashcard" :class="{ flipped: state.flipped }" @click="flip">
+      <div class="flashcard" :class="{ flipped: state.flipped }"
+           @click="onCardClick"
+           @touchstart.passive="onTouchStart"
+           @touchmove.passive="onTouchMove"
+           @touchend.passive="onTouchEnd">
         <div class="card-face">
           <div class="card-word">{{ getCurrentCard().wordData.word }}</div>
           <div class="card-rank">词频排名 #{{ getCurrentCard().wordData.rank }}</div>
@@ -114,6 +148,11 @@ const ReviewView = {
           <span class="prof-name">{{ level.name }}</span>
         </button>
       </div>
+
+      <!-- 加入临时（复制，不影响原熟练度） -->
+      <button class="temp-add-btn" @click="addTemp" title="复制到临时列表，当前熟练度保持不变">
+        🔖 加入临时
+      </button>
 
       <button @click="skip"
               style="background:none;border:none;color:var(--text-light);cursor:pointer;font-size:13px;">
